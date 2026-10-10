@@ -1,0 +1,10 @@
+node_modules
+.next
+.env.local
+.env*.local
+.vercel
+next-env.d.ts
+*.tsbuildinfo
+# Your real job data. Keep it out of git (and out of any public repo).
+data/store.json
+data/*.tmp
