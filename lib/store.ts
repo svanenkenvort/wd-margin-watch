@@ -104,6 +104,7 @@ export function blankJob(partial: Partial<Job> = {}): Job {
     notes: "",
     source: "manual",
     builderPrimeId: null,
+    builderPrimeJobNumber: null,
     updatedAt: now(),
     ...partial,
   };

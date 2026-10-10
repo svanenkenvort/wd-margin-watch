@@ -184,7 +184,7 @@ export function attention(rows: Row[], settings: Settings, year: number): Attent
   const open = openRows(rows);
   for (const { job, c } of open) {
     if (c.missing.length)
-      out.push({ id: `n-${job.id}`, jobId: job.id, kind: "numbers", tab: "open", title: `${job.name} needs numbers`, detail: `Add ${c.missing.join(" and ").toLowerCase()}` });
+      out.push({ id: `n-${job.id}`, jobId: job.id, kind: "numbers", tab: "open", title: `${job.name} needs numbers`, detail: `Add ${c.missing.map((m) => (m.startsWith("ProVia") ? m : m.toLowerCase())).join(" and ")}` });
   }
   for (const { job, c } of completedIn(rows, year)) {
     if (c.balance > 1)

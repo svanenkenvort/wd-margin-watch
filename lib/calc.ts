@@ -52,6 +52,8 @@ export function compute(job: Job, settings: Settings): Computed {
     grossAfterCommission !== null && g ? grossAfterCommission / g : null;
 
   const missing: string[] = [];
+  if (!job.jobNumber.trim()) missing.push("ProVia Order #");
+  if (!job.contractValue) missing.push("Contract value");
   if (job.materialsEst === null) missing.push("Materials est.");
   if (job.laborEst === null) missing.push("Labor est.");
   if (job.state === "completed" && job.laborActual === null) missing.push("Labor paid");

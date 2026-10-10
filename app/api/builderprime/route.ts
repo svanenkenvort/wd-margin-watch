@@ -6,9 +6,9 @@ export const dynamic = "force-dynamic";
 
 /** GET = test the connection and show what Builder Prime returns. */
 export async function GET() {
-  const { settings } = await readStore();
+  const data = await readStore();
   try {
-    return ok(await testConnection(settings));
+    return ok(await testConnection(data.settings, data));
   } catch (e) {
     return fail(messageOf(e), e instanceof BpError && e.status ? e.status : 502);
   }

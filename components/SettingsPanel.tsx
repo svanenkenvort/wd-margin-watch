@@ -6,19 +6,63 @@ import { dateLabel, pct } from "@/lib/format";
 import type { RepSetting, Settings } from "@/lib/types";
 import { NumField, useToast } from "./inputs";
 
-interface TestResult {
-  base: string;
-  shape: string;
-  count: number;
-  fieldNames: string[];
-  mapped: Record<string, unknown> | null;
+interface NewProject {
+  builderPrimeId: string;
+  bpJobNumber: string;
+  name: string;
+  rep: string;
+  soldDate: string | null;
+  status: string;
+  projectName: string;
 }
-interface SyncResult {
+interface Plan {
+  firstSync: boolean;
   fetched: number;
-  created: number;
-  updated: number;
-  skipped: number;
-  skippedReason: string[];
+  sold: number;
+  toAdd: NewProject[];
+  notFoundInApp: NewProject[];
+}
+type TestResult = Plan & { base: string };
+type SyncResult = Plan & { created: number };
+
+function ProjectList({ items }: { items: NewProject[] }) {
+  return (
+    <table className="mini">
+      <thead><tr><th>Customer</th><th>Builder Prime job #</th><th>Project</th><th>Rep</th><th>Status</th></tr></thead>
+      <tbody>
+        {items.map((p) => (
+          <tr key={p.builderPrimeId}><td>{p.name}</td><td>{p.bpJobNumber}</td><td>{p.projectName}</td><td>{p.rep}</td><td>{p.status}</td></tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function PlanDetail({ plan, done }: { plan: Plan; done: boolean }) {
+  if (plan.firstSync)
+    return (
+      <>
+        <p className="hint">
+          {done ? "First sync done." : "This is the first sync."} The {plan.sold} projects already sold in Builder Prime are taken as already in the app, so nothing is added{done ? "" : " this time"}.
+          From then on, each project that turns sold in Builder Prime comes in as a new open job.
+        </p>
+        {plan.notFoundInApp.length > 0 && (
+          <>
+            <p className="hint low">
+              These open sold projects have no job with that customer&apos;s name in the app. If any is really missing, add it by hand: the sync takes it as already in the app.
+            </p>
+            <ProjectList items={plan.notFoundInApp} />
+          </>
+        )}
+      </>
+    );
+  if (!plan.toAdd.length) return <p className="hint">No new sales in Builder Prime.</p>;
+  return (
+    <>
+      <p className="hint">{plan.toAdd.length} new sale{plan.toAdd.length === 1 ? "" : "s"} {done ? "added" : "will be added"} as open jobs. Type the ProVia Order #, contract value and estimates on each. Builder Prime does not provide them.</p>
+      <ProjectList items={plan.toAdd} />
+    </>
+  );
 }
 
 export function SettingsPanel({ settings, bp }: { settings: Settings; bp: { base: string; hasKey: boolean; subdomain: string } }) {
@@ -103,17 +147,14 @@ export function SettingsPanel({ settings, bp }: { settings: Settings; bp: { base
         {error && <p className="alert" role="alert">{error}</p>}
         {test && (
           <div className="result">
-            <p><strong>Connected.</strong> Builder Prime returned {test.count} project{test.count === 1 ? "" : "s"} ({test.shape}).</p>
-            <p className="hint">Fields on each project: {test.fieldNames.join(", ") || "none"}</p>
-            {test.mapped && <pre>{JSON.stringify(test.mapped, null, 2)}</pre>}
-            <p className="hint">If a value above is empty or wrong, the matching field name goes first in lib/bp-mapping.ts.</p>
+            <p><strong>Connected.</strong> Builder Prime has {test.fetched} projects, {test.sold} of them sold. Nothing was saved.</p>
+            <PlanDetail plan={test} done={false} />
           </div>
         )}
         {sync && (
           <div className="result">
-            <p><strong>Sync finished.</strong> {sync.fetched} projects checked: {sync.created} added, {sync.updated} updated, {sync.skipped} skipped.</p>
-            {sync.skippedReason.map((r) => <p key={r} className="hint">{r}</p>)}
-            <p className="hint">Your entered numbers are never overwritten by a sync.</p>
+            <p><strong>Sync finished.</strong> {sync.fetched} projects checked, {sync.created} added. Jobs already in the app are never changed.</p>
+            <PlanDetail plan={sync} done />
           </div>
         )}
       </section>

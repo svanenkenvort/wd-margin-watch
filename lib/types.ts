@@ -14,6 +14,7 @@ export type JobSource = "sheet" | "builderprime" | "manual";
 /** Everything stored for one job. Calculated columns are never stored — see calc.ts. */
 export interface Job {
   id: string;
+  /** The ProVia Order # (what the spreadsheet called the job number). */
   jobNumber: string;
   name: string;
   product: string;
@@ -47,6 +48,8 @@ export interface Job {
   notes: string;
   source: JobSource;
   builderPrimeId: string | null;
+  /** Builder Prime's own job # (e.g. 1950), for finding the project there. Not the job number. */
+  builderPrimeJobNumber?: string | null;
   updatedAt: string;
 }
 
@@ -66,6 +69,8 @@ export interface StoreData {
   version: 1;
   settings: Settings;
   jobs: Job[];
+  /** Builder Prime projects already seen sold. Any project that turns sold later is a new sale. */
+  bpSoldSeen?: string[];
 }
 
 export const STAGES: { key: Stage; label: string; color: string }[] = [

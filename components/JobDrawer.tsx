@@ -50,6 +50,7 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
           {!creating && (
             <p className="sub">
               Job {d.jobNumber || "–"} {d.source === "builderprime" ? "from Builder Prime" : d.source === "sheet" ? "imported from your spreadsheet" : "added by hand"}
+              {d.builderPrimeJobNumber && <> · Builder Prime job #{d.builderPrimeJobNumber}</>}
             </p>
           )}
         </div>
@@ -61,7 +62,7 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
           <legend>Job</legend>
           <label className="field"><span>Customer name</span><input value={d.name} onChange={(e) => set("name", e.target.value)} placeholder="LAST NAME" autoFocus={creating} /></label>
           <div className="field-row">
-            <label className="field"><span>Job number</span><input value={d.jobNumber} onChange={(e) => set("jobNumber", e.target.value)} /></label>
+            <label className="field"><span>Job number (ProVia Order #)</span><input value={d.jobNumber} onChange={(e) => set("jobNumber", e.target.value)} /></label>
             <label className="field"><span>Product</span><input value={d.product} onChange={(e) => set("product", e.target.value.toUpperCase())} placeholder="W, PD, ED" /></label>
           </div>
           <div className="field-row">

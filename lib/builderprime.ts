@@ -1,12 +1,11 @@
-import { asDate, asNumber, asText, pick } from "./bp-mapping";
+import { asDate, customerName, isSold, repName, sameCustomer, type BpProject } from "./bp-mapping";
 import { blankJob, mutate } from "./store";
-import type { Job, Settings } from "./types";
+import type { Job, Settings, StoreData } from "./types";
 
 /**
  * Builder Prime Open API client.
  * Base URL: https://{subdomain}.builderprime.com   Auth: x-api-key header (set in .env.local).
- * Builder Prime publishes no endpoint reference, so this is deliberately tolerant and
- * everything it learns is shown in Settings > Test connection.
+ * Only reads. Sync brings in new sales and never changes a job already in the app.
  */
 export function bpConfig(settings: Settings) {
   const key = process.env.BUILDERPRIME_API_KEY ?? "";
@@ -37,140 +36,122 @@ async function bpGet(settings: Settings, path: string, params: Record<string, st
   return res.json();
 }
 
-function listFrom(body: unknown): unknown[] {
-  if (Array.isArray(body)) return body;
-  if (body && typeof body === "object") {
-    const o = body as Record<string, unknown>;
-    for (const k of ["data", "items", "results", "projects", "content", "records"]) if (Array.isArray(o[k])) return o[k] as unknown[];
+/** Every project. Builder Prime pages from page=0 with at most limit=100, and needs both. */
+export async function fetchProjects(settings: Settings): Promise<BpProject[]> {
+  const out: BpProject[] = [];
+  for (let page = 0; page < 200; page++) {
+    const body = (await bpGet(settings, "/api/projects/v1", { page: String(page), limit: "100" })) as { data?: unknown };
+    const rows = Array.isArray(body?.data) ? (body.data as BpProject[]) : [];
+    out.push(...rows);
+    if (rows.length < 100) break;
   }
-  return [];
+  return out;
 }
 
-export async function fetchProjects(settings: Settings, limit = 2000): Promise<{ records: unknown[]; shape: string }> {
-  const first = await bpGet(settings, "/api/projects/v1");
-  const records = [...listFrom(first)];
-  const shape = Array.isArray(first) ? "array" : `object with keys: ${Object.keys((first as object) ?? {}).join(", ")}`;
-  // Page through if the API pages with ?page=. Stops when a page repeats or comes back empty.
-  const firstId = JSON.stringify(records[0] ?? null);
-  for (let page = 2; page <= 40 && records.length < limit && records.length > 0; page++) {
-    let next: unknown[] = [];
-    try {
-      next = listFrom(await bpGet(settings, "/api/projects/v1", { page: String(page) }));
-    } catch {
-      break;
-    }
-    if (!next.length || JSON.stringify(next[0]) === firstId) break;
-    records.push(...next);
-  }
-  return { records, shape };
-}
-
-export interface MappedProject {
-  builderPrimeId: string | null;
-  jobNumber: string;
+export interface NewProject {
+  builderPrimeId: string;
+  bpJobNumber: string;
   name: string;
-  contractValue: number | null;
-  soldDate: string | null;
   rep: string;
-  product: string;
-  depositAmount: number | null;
-  totalPaid: number | null;
+  /** Builder Prime has no sold date; this is its last change to the project, which is on or after the sale. */
+  soldDate: string | null;
   status: string;
+  projectName: string;
+  projectType: string;
+  materialCost: number | null;
 }
 
-export function mapProject(r: unknown): MappedProject {
-  const id = pick(r, "id");
+function describe(p: BpProject, known: string[]): NewProject {
   return {
-    builderPrimeId: id !== undefined ? String(id) : null,
-    jobNumber: asText(pick(r, "jobNumber")),
-    name: asText(pick(r, "name")).toUpperCase(),
-    contractValue: asNumber(pick(r, "contractValue")),
-    soldDate: asDate(pick(r, "soldDate")),
-    rep: asText(pick(r, "rep")).toUpperCase(),
-    product: asText(pick(r, "product")).toUpperCase(),
-    depositAmount: asNumber(pick(r, "depositAmount")),
-    totalPaid: asNumber(pick(r, "totalPaid")),
-    status: asText(pick(r, "status")),
+    builderPrimeId: String(p.id),
+    bpJobNumber: p.companySequenceNumber != null ? String(p.companySequenceNumber) : "",
+    name: customerName(p),
+    rep: repName(p, known),
+    soldDate: asDate(p.lastModifiedDate),
+    status: p.projectStatusDescription ?? "",
+    projectName: (p.projectName ?? "").trim(),
+    projectType: (p.projectTypeDescription ?? "").trim(),
+    materialCost: typeof p.materialCost === "number" ? p.materialCost : null,
   };
 }
 
-export async function testConnection(settings: Settings) {
-  const cfg = bpConfig(settings);
-  const { records, shape } = await fetchProjects(settings, 25);
-  const sample = records[0] ?? null;
-  return {
-    base: cfg.base,
-    shape,
-    count: records.length,
-    fieldNames: sample && typeof sample === "object" ? Object.keys(sample as object) : [],
-    mapped: sample ? mapProject(sample) : null,
-    sample,
-  };
-}
-
-export interface SyncReport {
+export interface SyncPlan {
+  /** First sync: every project sold so far is taken as already in the app, and nothing is added. */
+  firstSync: boolean;
   fetched: number;
-  created: number;
-  updated: number;
-  skipped: number;
-  skippedReason: string[];
+  sold: number;
+  toAdd: NewProject[];
+  /** First sync only: open sold projects with no job of that customer's name in the app. */
+  notFoundInApp: NewProject[];
 }
 
 /**
- * Pulls projects from Builder Prime. New projects arrive as open jobs; existing jobs only get the
- * fields Builder Prime owns (name, contract value, sold date, rep, payments). The seven numbers
- * you enter by hand are never overwritten.
+ * Which projects are new sales. Builder Prime has no ProVia Order # to match jobs on, so the app
+ * remembers which projects it has seen sold; a project that turns sold after that is new.
+ */
+function plan(projects: BpProject[], data: StoreData): SyncPlan {
+  const known = [...new Set([...data.settings.reps.map((r) => r.name), ...data.jobs.map((j) => j.rep)])].filter(Boolean);
+  const sold = projects.filter(isSold);
+  const seen = data.bpSoldSeen ? new Set(data.bpSoldSeen) : null;
+  const linked = new Set(data.jobs.map((j) => j.builderPrimeId).filter(Boolean));
+  if (!seen) {
+    const open = sold.filter((p) => p.projectStatusCategoryDescription !== "POST_PRODUCTION");
+    return {
+      firstSync: true,
+      fetched: projects.length,
+      sold: sold.length,
+      toAdd: [],
+      notFoundInApp: open.filter((p) => !data.jobs.some((j) => sameCustomer(j.name, p))).map((p) => describe(p, known)),
+    };
+  }
+  return {
+    firstSync: false,
+    fetched: projects.length,
+    sold: sold.length,
+    toAdd: sold.filter((p) => !seen.has(String(p.id)) && !linked.has(String(p.id))).map((p) => describe(p, known)),
+    notFoundInApp: [],
+  };
+}
+
+const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+function toJob(n: NewProject): Job {
+  const from = [n.projectName, n.projectType].filter(Boolean).join(", ");
+  return blankJob({
+    builderPrimeId: n.builderPrimeId,
+    builderPrimeJobNumber: n.bpJobNumber || null,
+    jobNumber: "",
+    name: n.name || "NEW JOB",
+    rep: n.rep,
+    soldDate: n.soldDate,
+    stage: "awaitingDeposit",
+    notes: `Builder Prime job #${n.bpJobNumber}${from ? `: ${from}` : ""}.${n.materialCost ? ` Builder Prime cost ${money(n.materialCost)}.` : ""}`,
+    source: "builderprime",
+  });
+}
+
+/** What a sync would do, without saving anything. */
+export async function testConnection(settings: Settings, data: StoreData) {
+  const cfg = bpConfig(settings);
+  const projects = await fetchProjects(settings);
+  return { base: cfg.base, ...plan(projects, data) };
+}
+
+export interface SyncReport extends SyncPlan {
+  created: number;
+}
+
+/**
+ * Adds new sales from Builder Prime as open jobs. Jobs already in the app are never changed.
+ * New jobs still need their ProVia Order #, contract value and the other numbers typed in.
  */
 export async function syncProjects(settings: Settings): Promise<SyncReport> {
-  const { records } = await fetchProjects(settings);
-  const mapped = records.map(mapProject);
-  const report: SyncReport = { fetched: mapped.length, created: 0, updated: 0, skipped: 0, skippedReason: [] };
-
-  await mutate((d) => {
-    for (const m of mapped) {
-      if (!m.jobNumber || m.contractValue === null) {
-        report.skipped++;
-        if (report.skippedReason.length < 5) report.skippedReason.push(`Project ${m.builderPrimeId ?? "?"} has no job number or contract value`);
-        continue;
-      }
-      const existing: Job | undefined =
-        d.jobs.find((j) => m.builderPrimeId && j.builderPrimeId === m.builderPrimeId) ??
-        d.jobs.find((j) => j.jobNumber === m.jobNumber && Math.abs(j.contractValue - (m.contractValue ?? 0)) < 0.01);
-      if (existing) {
-        let changed = false;
-        const set = <K extends keyof Job>(k: K, v: Job[K]) => {
-          if (v !== undefined && existing[k] !== v) {
-            existing[k] = v;
-            changed = true;
-          }
-        };
-        if (!existing.builderPrimeId && m.builderPrimeId) set("builderPrimeId", m.builderPrimeId);
-        if (existing.state === "open") {
-          if (m.soldDate) set("soldDate", m.soldDate);
-          if (m.depositAmount !== null) set("depositAmount", m.depositAmount);
-        }
-        if (changed) {
-          existing.updatedAt = new Date().toISOString();
-          report.updated++;
-        }
-      } else {
-        d.jobs.push(
-          blankJob({
-            builderPrimeId: m.builderPrimeId,
-            jobNumber: m.jobNumber,
-            name: m.name || "NEW JOB",
-            product: m.product,
-            rep: m.rep,
-            soldDate: m.soldDate,
-            contractValue: m.contractValue ?? 0,
-            depositAmount: m.depositAmount ?? m.totalPaid ?? 0,
-            source: "builderprime",
-          }),
-        );
-        report.created++;
-      }
-    }
+  const projects = await fetchProjects(settings);
+  return mutate((d) => {
+    const p = plan(projects, d);
+    for (const n of p.toAdd) d.jobs.push(toJob(n));
+    d.bpSoldSeen = [...new Set([...(d.bpSoldSeen ?? []), ...projects.filter(isSold).map((x) => String(x.id))])];
     d.settings.builderPrime.lastSync = new Date().toISOString();
+    return { ...p, created: p.toAdd.length };
   });
-  return report;
 }

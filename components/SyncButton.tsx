@@ -20,7 +20,7 @@ export function SyncButton() {
             const data = await res.json();
             if (!res.ok) show(data.error ?? "Builder Prime didn't answer.", "error");
             else {
-              show(`Builder Prime synced: ${data.created} new, ${data.updated} updated`);
+              show(data.firstSync ? "Builder Prime connected. New sales come in from the next sync." : `Builder Prime synced: ${data.created} new sale${data.created === 1 ? "" : "s"} added`);
               router.refresh();
             }
           } catch {

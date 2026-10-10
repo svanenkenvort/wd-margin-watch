@@ -1,69 +1,73 @@
 /**
- * Builder Prime does not publish its response format, so field names are matched
- * against the likely candidates below (first hit wins; dotted paths reach into
- * nested objects). Use Settings > "Test connection" to see the real field names
- * from your account, then put the right one first in a list.
+ * Builder Prime project records, as GET /api/projects/v1 returns them (checked against the live
+ * API on 2026-10-10). The records are flat: there is no scope, price line, contract amount, sold
+ * date or payment on them, and no other Open API endpoint has them either. So the ProVia Order #
+ * (the job number), contract value and payments are typed in the app; Builder Prime supplies who,
+ * which rep, its own job # and when the project turned sold.
  */
-export const BP_FIELDS = {
-  id: ["id", "projectId", "uuid"],
-  jobNumber: ["jobNumber", "projectNumber", "number", "contractNumber", "jobNo"],
-  name: ["clientLastName", "client.lastName", "customerLastName", "lastName", "clientName", "client.name", "name", "projectName"],
-  contractValue: ["contractAmount", "contractValue", "contractTotal", "totalContractAmount", "totalAmount", "contract.amount", "amount", "total"],
-  soldDate: ["soldDate", "dateSold", "contractSignedDate", "signedDate", "saleDate", "contract.signedDate", "createdDate", "createdAt"],
-  rep: ["salesPersonName", "salesperson.name", "salesPerson.name", "salesRepName", "salesRep", "salesPerson", "salesperson"],
-  product: ["projectType", "projectTypeName", "type", "category"],
-  depositAmount: ["depositAmount", "deposit", "paymentsReceived.deposit"],
-  totalPaid: ["totalPaid", "paymentsReceived", "amountPaid", "totalPayments", "paidAmount"],
-  status: ["status", "statusName", "projectStatus", "stage"],
-} as const;
-
-export type BpKey = keyof typeof BP_FIELDS;
-
-function dig(obj: unknown, path: string): unknown {
-  return path.split(".").reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined), obj);
+export interface BpProject {
+  id: number | string;
+  /** Builder Prime's own job # ("Job #1950" in Builder Prime). Not the app's job number. */
+  companySequenceNumber: number | null;
+  projectName: string | null;
+  clientFirstName: string | null;
+  clientLastName: string | null;
+  clientCompanyName: string | null;
+  salesPersonFirstName: string | null;
+  salesPersonLastName: string | null;
+  projectTypeDescription: string | null;
+  projectStatusDescription: string | null;
+  /** SALES, PRE_PRODUCTION, PRODUCTION, POST_PRODUCTION or LOST_CANCELED */
+  projectStatusCategoryDescription: string | null;
+  projectStatusIsCancelled: boolean | null;
+  materialCost: number | null;
+  lastModifiedDate: number | null;
 }
 
-export function pick(record: unknown, key: BpKey): unknown {
-  for (const path of BP_FIELDS[key]) {
-    const v = dig(record, path);
-    if (v !== undefined && v !== null && v !== "") return v;
-  }
-  return undefined;
-}
+/** Status categories that mean the project is sold (Sold, Deposit Received, Scheduled, Complete). */
+const SOLD_CATEGORIES = new Set(["PRE_PRODUCTION", "PRODUCTION", "POST_PRODUCTION"]);
 
-export function asNumber(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = Number(v.replace(/[$,\s]/g, ""));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
+export const isSold = (p: BpProject) => SOLD_CATEGORIES.has(p.projectStatusCategoryDescription ?? "") && !p.projectStatusIsCancelled;
 
-/** Accepts ISO strings, "2026-06-01T00:00:00Z", or epoch milliseconds. Returns yyyy-mm-dd. */
+/** Epoch milliseconds (what Builder Prime sends) or an ISO string, as yyyy-mm-dd in local time. */
 export function asDate(v: unknown): string | null {
-  if (typeof v === "number") {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-  }
-  if (typeof v === "string") {
-    const m = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-  }
-  return null;
+  const d = typeof v === "number" ? new Date(v) : typeof v === "string" ? new Date(v) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function asText(v: unknown): string {
-  if (typeof v === "string") return v.trim();
-  if (typeof v === "number") return String(v);
-  if (v && typeof v === "object") {
-    const o = v as Record<string, unknown>;
-    const first = o.firstName ?? "";
-    const last = o.lastName ?? "";
-    const full = `${first} ${last}`.trim();
-    return full || (typeof o.name === "string" ? o.name : "");
+const clean = (v: string | null | undefined) => (v ?? "").replace(/\s+/g, " ").trim();
+
+/** The customer name the way the spreadsheet has it: last name, upper case. */
+export function customerName(p: BpProject): string {
+  return (clean(p.clientLastName) || clean(p.clientCompanyName) || clean(p.projectName)).toUpperCase();
+}
+
+/**
+ * The rep the way the app already writes them: "SHAUN V" for Shaun Van Enkenvort if that is in
+ * use, otherwise "SHAUN" if that is, otherwise first name and last initial.
+ */
+export function repName(p: BpProject, known: string[]): string {
+  const first = clean(p.salesPersonFirstName).toUpperCase();
+  const last = clean(p.salesPersonLastName).toUpperCase();
+  if (!first) return "";
+  const withInitial = last ? `${first} ${last[0]}` : first;
+  return [withInitial, first].find((n) => known.includes(n)) ?? withInitial;
+}
+
+/**
+ * True when an app job's name is this customer: "VAN LAANEN", "VANLAANEN" or "VAN LAANEN #2" all
+ * match Van Laanen, but "LANGE" does not match Lang.
+ */
+export function sameCustomer(appName: string, p: BpProject): boolean {
+  const target = customerName(p).replace(/[^A-Z]/g, "");
+  if (!target) return false;
+  const words = appName.toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+  let joined = "";
+  for (const w of words) {
+    joined += w;
+    if (joined === target) return true;
+    if (joined.length >= target.length) return false;
   }
-  return "";
+  return false;
 }
