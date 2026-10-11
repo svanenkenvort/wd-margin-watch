@@ -30,7 +30,7 @@ Settings: address `https://windowdepotnew.builderprime.com`, key in `.env.local`
 |---|---|
 | Customer, sales rep, product (windows, patio door, entry door) | ProVia Order # (the job number) |
 | Contract value (after discounts, = Sold Contracts "Sale Amount") | Date sold |
-| Total paid so far (goes in as the deposit on a new job) | Labor est. and labor paid |
+| Total paid so far (goes in as the deposit on a new job; its date is the sale date once you enter it) | Labor est. and labor paid |
 | Builder Prime cost (fills materials est. when empty) | Finance %, materials paid, payment split and dates |
 | Builder Prime job #, status, completed date | Commission paid |
 
@@ -39,7 +39,8 @@ Builder Prime's API has no ProVia Order #, sale date, discount, payment dates or
 **How sync works**
 
 - **First sync** reads every sold project (about 2–3 minutes: Builder Prime allows roughly 80 requests,
-  then makes the app wait ~40 seconds). It links your existing jobs to their Builder Prime project by
+  then makes the app wait ~40 seconds; a bar at the bottom of the screen shows progress and counts
+  down the wait). It links your existing jobs to their Builder Prime project by
   customer name and contract value, and adds nothing.
 - **Returning customers**: every Builder Prime project is its own job. A project is only linked to a
   job of the same customer and contract value that was not sold before the project existed in

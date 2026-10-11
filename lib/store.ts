@@ -121,7 +121,10 @@ export const updateJob = (id: string, patch: Partial<Job>) =>
   mutate((d) => {
     const job = d.jobs.find((j) => j.id === id);
     if (!job) return null;
+    const soldBefore = job.soldDate;
     Object.assign(job, pickEditable(patch), { updatedAt: now() });
+    // Builder Prime gives the amount paid but not when; the deposit is taken at the sale.
+    if (job.soldDate && job.soldDate !== soldBefore && job.depositAmount > 0 && !job.depositDate && !job.financed) job.depositDate = job.soldDate;
     return job;
   });
 

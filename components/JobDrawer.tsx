@@ -34,12 +34,16 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
   const defaultRate = settings.reps.find((r) => r.name === d.rep)?.commissionRate;
   const fromBp = !!d.builderPrimeId && !completed;
 
+  /** The deposit is taken at the sale, so an empty deposit date follows the sale date. */
+  const setSoldDate = (v: string | null) =>
+    setD((p) => ({ ...p, soldDate: v, depositDate: !p.depositDate && v && p.depositAmount > 0 && !p.financed ? v : p.depositDate }));
+
   /** Builder Prime has more paid than entered: put the difference in the next empty payment. */
   const addBpPayments = () => {
     const diff = Math.round(((d.bp?.paid ?? 0) - c.totalPayments) * 100) / 100;
     if (diff <= 0) return;
     const slot = !d.depositAmount ? "deposit" : !d.stageAmount ? "stage" : "final";
-    if (slot === "deposit") set("depositAmount", diff);
+    if (slot === "deposit") setD((p) => ({ ...p, depositAmount: diff, depositDate: p.depositDate ?? p.soldDate }));
     else if (slot === "stage") set("stageAmount", diff);
     else set("finalAmount", (d.finalAmount || 0) + diff);
     requestAnimationFrame(() => document.getElementById(`f-${slot}Date`)?.focus());
@@ -86,7 +90,7 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
               <input list="reps" value={d.rep} onChange={(e) => set("rep", e.target.value.toUpperCase())} />
               <datalist id="reps">{settings.reps.map((r) => <option key={r.name} value={r.name} />)}</datalist>
             </label>
-            <label className="field"><span>Date sold</span><DateField id="f-soldDate" needed value={d.soldDate} onChange={(v) => set("soldDate", v)} label="Date sold" /></label>
+            <label className="field"><span>Date sold</span><DateField id="f-soldDate" needed value={d.soldDate} onChange={setSoldDate} label="Date sold" /></label>
           </div>
           {!completed && (
             <label className="field">

@@ -22,6 +22,26 @@ export class BpError extends Error {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Where a running sync is, for the screen to show. Kept on globalThis because each API route is
+ * bundled separately and would otherwise see its own copy of this module.
+ */
+export interface SyncProgress {
+  running: boolean;
+  step: "list" | "details" | "saving" | "";
+  done: number;
+  total: number;
+  /** While Builder Prime makes us wait (429): when the wait ends, in epoch ms. */
+  waitUntil: number | null;
+  /** The last finished sync, so a page that didn't start it can still say how it went. */
+  last: { at: string; report?: SyncReport; error?: string } | null;
+}
+const g = globalThis as unknown as { __bpSync?: SyncProgress };
+export const syncProgress = (): SyncProgress => g.__bpSync ?? { running: false, step: "", done: 0, total: 0, waitUntil: null, last: null };
+const setProgress = (p: Partial<SyncProgress>) => {
+  g.__bpSync = { ...syncProgress(), ...p };
+};
+
 async function bpGet(settings: Settings, path: string, params: Record<string, string> = {}): Promise<unknown> {
   const cfg = bpConfig(settings);
   if (!cfg.hasKey) throw new BpError("No API key found. Add BUILDERPRIME_API_KEY to .env.local and restart the app.");
@@ -36,7 +56,9 @@ async function bpGet(settings: Settings, path: string, params: Record<string, st
     }
     if (res.status === 429 && attempt < 8) {
       const wait = Math.min(Number(res.headers.get("retry-after")) || 30, 120);
+      if (syncProgress().running) setProgress({ waitUntil: Date.now() + (wait + 1) * 1000 });
       await sleep((wait + 1) * 1000);
+      if (syncProgress().running) setProgress({ waitUntil: null });
       continue;
     }
     if (res.status === 401 || res.status === 403)
@@ -260,11 +282,9 @@ function couldBe(j: Job, p: BpProject, isNewSale: boolean): boolean {
   return !created || !j.soldDate || j.soldDate >= daysBefore(created, 7);
 }
 
-let running = false;
-
 export async function syncProjects(settings: Settings): Promise<SyncReport> {
-  if (running) throw new BpError("A Builder Prime sync is already running. It can take a few minutes the first time.", 409);
-  running = true;
+  if (syncProgress().running) throw new BpError("A Builder Prime sync is already running. It can take a few minutes the first time.", 409);
+  setProgress({ running: true, step: "list", done: 0, total: 0, waitUntil: null });
   try {
     const projects = await fetchProjects(settings);
     const sold = projects.filter(isSold);
@@ -272,9 +292,10 @@ export async function syncProjects(settings: Settings): Promise<SyncReport> {
     const cache: Cache = { ...(before.bpCache ?? {}) };
     const linked = new Map(before.jobs.filter((j) => j.builderPrimeId).map((j) => [j.builderPrimeId!, j]));
     const report: SyncReport = { firstSync: false, fetched: projects.length, sold: sold.length, detailsRead: 0, created: 0, linked: 0, updated: 0, changes: [], review: { notInApp: 0, maybe: 0 } };
-    for (const p of sold) {
+    const toRead = sold.filter((p) => needsDetail(p, cache[String(p.id)], linked.get(String(p.id))));
+    setProgress({ step: "details", done: 0, total: toRead.length });
+    for (const p of toRead) {
       const id = String(p.id);
-      if (!needsDetail(p, cache[id], linked.get(id))) continue;
       const detail = await fetchDetail(settings, id);
       cache[id] = {
         modified: p.lastModifiedDate ?? null,
@@ -283,11 +304,17 @@ export async function syncProjects(settings: Settings): Promise<SyncReport> {
         paid: num(detail.totalPaidAmount),
       };
       report.detailsRead++;
+      setProgress({ done: report.detailsRead });
     }
+    setProgress({ step: "saving" });
     await mutate((d) => place(d, sold, cache, report));
+    setProgress({ last: { at: new Date().toISOString(), report } });
     return report;
+  } catch (e) {
+    setProgress({ last: { at: new Date().toISOString(), error: (e as Error).message } });
+    throw e;
   } finally {
-    running = false;
+    setProgress({ running: false, step: "", waitUntil: null });
   }
 }
 

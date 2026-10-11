@@ -5,6 +5,7 @@ import { useState } from "react";
 import { dateLabel, money, pct } from "@/lib/format";
 import type { BpCandidate, BpReview, RepSetting, Settings } from "@/lib/types";
 import { NumField, useToast } from "./inputs";
+import { useSync, type SyncResult } from "./useSync";
 
 interface TestResult {
   base: string;
@@ -14,17 +15,6 @@ interface TestResult {
   firstSync: boolean;
   toRead: number;
   minutes: number;
-}
-interface SyncResult {
-  firstSync: boolean;
-  fetched: number;
-  sold: number;
-  detailsRead: number;
-  created: number;
-  linked: number;
-  updated: number;
-  changes: string[];
-  review: { notInApp: number; maybe: number };
 }
 
 /** Sold projects the sync could not place by itself: add them, link them to a job, or leave them out. */
@@ -100,7 +90,7 @@ export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp
   const [reps, setReps] = useState<RepSetting[]>(settings.reps);
   const [target, setTarget] = useState(settings.targetMargin);
   const [allowance, setAllowance] = useState(settings.materialsAllowance);
-  const [busy, setBusy] = useState<"" | "test" | "sync" | "save">("");
+  const [busy, setBusy] = useState<"" | "test" | "save">("");
   const [test, setTest] = useState<TestResult | null>(null);
   const [sync, setSync] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -115,18 +105,23 @@ export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp
     } else show((await res.json().catch(() => ({}))).error ?? "That didn't save.", "error");
   };
 
+  const syncer = useSync((data, err) => {
+    if (err) setError(err);
+    else if (data) {
+      setSync(data);
+      router.refresh();
+    }
+  });
+
   const run = async (kind: "test" | "sync") => {
-    setBusy(kind);
     setError(null);
+    if (kind === "sync") return syncer.start();
+    setBusy(kind);
     try {
-      const res = await fetch("/api/builderprime", { method: kind === "test" ? "GET" : "POST" });
+      const res = await fetch("/api/builderprime", { method: "GET" });
       const data = await res.json();
       if (!res.ok) setError(data.error ?? "Builder Prime didn't answer.");
-      else if (kind === "test") setTest(data);
-      else {
-        setSync(data);
-        router.refresh();
-      }
+      else setTest(data);
     } catch {
       setError("Couldn't reach the app. Check that it is still running.");
     }
@@ -171,10 +166,15 @@ export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp
         </dl>
         <div className="btn-row">
           <button className="btn" onClick={() => run("test")} disabled={busy !== ""}>{busy === "test" ? "Testing…" : "Test connection"}</button>
-          <button className="btn btn-primary" onClick={() => run("sync")} disabled={busy !== "" || !bp.hasKey}>{busy === "sync" ? "Syncing…" : "Sync jobs now"}</button>
+          <button className="btn btn-primary" onClick={() => run("sync")} disabled={busy !== "" || syncer.running || !bp.hasKey}>{syncer.running ? "Syncing…" : "Sync jobs now"}</button>
         </div>
         {error && <p className="alert" role="alert">{error}</p>}
-        {busy === "sync" && <p className="hint">Reading Builder Prime. The first sync reads every sold project and takes a few minutes because Builder Prime limits how fast it answers.</p>}
+        {syncer.running && (
+          <div className={`sync-panel${syncer.waiting ? " waiting" : ""}`} role="status" aria-live="polite">
+            <strong>{syncer.status}</strong>
+            <p className="hint">Builder Prime answers about 80 requests, then makes the app wait about 40 seconds. The first sync reads every sold project, so it takes a few minutes. You can leave this page; the sync keeps going.</p>
+          </div>
+        )}
         {test && (
           <div className="result">
             <p><strong>Connected.</strong> Builder Prime has {test.projects} projects, {test.sold} of them sold; {test.linked} are linked to jobs here. Nothing was saved.</p>
