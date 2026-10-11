@@ -121,7 +121,7 @@ export async function workbook(data: StoreData): Promise<Buffer> {
     "Settings",
     [{ header: "Setting", width: 34, kind: "text" }, { header: "Value", width: 30, kind: "text" }],
     [
-      ["Target gross profit", `${(data.settings.targetMargin * 100).toFixed(1)}%`],
+      ["Target margin after commission", `${(data.settings.targetMargin * 100).toFixed(1)}%`],
       ["Materials allowance added to estimates", `${(data.settings.materialsAllowance * 100).toFixed(1)}%`],
       ["Builder Prime account", data.settings.builderPrime.subdomain],
       ["Last Builder Prime sync", data.settings.builderPrime.lastSync ?? "never"],

@@ -22,14 +22,24 @@ const EDITABLE: (keyof Job)[] = [
 ];
 
 const DEFAULT_SETTINGS: Settings = {
-  targetMargin: 0.5,
+  targetMargin: 0.4,
+  marginBasis: "afterCommission",
   materialsAllowance: 0.03,
   reps: [],
   builderPrime: { subdomain: "windowdepotnew", lastSync: null },
 };
 
 const empty = (): StoreData => ({ version: 1, settings: DEFAULT_SETTINGS, jobs: [] });
-const withDefaults = (data: StoreData): StoreData => ({ ...data, settings: { ...DEFAULT_SETTINGS, ...data.settings } });
+const withDefaults = (data: StoreData): StoreData => {
+  const settings = { ...DEFAULT_SETTINGS, ...data.settings };
+  // The target used to be gross profit before commission, defaulting to 50%. Margins are now after
+  // commission, so that old default becomes 40%; a target someone typed is kept.
+  if (data.settings && !data.settings.marginBasis) {
+    settings.marginBasis = "afterCommission";
+    if (data.settings.targetMargin === undefined || data.settings.targetMargin === 0.5) settings.targetMargin = 0.4;
+  }
+  return { ...data, settings };
+};
 
 /* ---------- Postgres ---------- */
 

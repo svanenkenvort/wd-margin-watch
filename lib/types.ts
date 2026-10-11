@@ -99,7 +99,10 @@ export interface RepSetting {
 }
 
 export interface Settings {
+  /** Target margin after commission */
   targetMargin: number;
+  /** Set once the target is a margin after commission (it used to be gross profit before commission) */
+  marginBasis?: "afterCommission";
   materialsAllowance: number;
   reps: RepSetting[];
   builderPrime: { subdomain: string; lastSync: string | null };

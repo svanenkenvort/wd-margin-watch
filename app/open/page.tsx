@@ -27,7 +27,7 @@ export default async function OpenJobs({ searchParams }: { searchParams: Promise
           { label: "Contract value", value: money(s.revenue) },
           { label: "Collected so far", value: money(s.collected) },
           { label: "Still to collect", value: money(s.balance) },
-          { label: "Estimated margin", value: pct(s.estPct), tone: s.estPct !== null && s.estPct < target ? "warn" : "good", note: `target ${pct(target, 0)}` },
+          { label: "Estimated margin after commission", value: pct(s.estAfterCommissionPct), tone: s.estAfterCommissionPct !== null && s.estAfterCommissionPct < target ? "warn" : "good", note: `target ${pct(target, 0)}` },
           { label: "Jobs with entries to make", value: String(needs), tone: needs ? "warn" : "good" },
         ]}
       />

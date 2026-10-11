@@ -167,9 +167,9 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
         </fieldset>
 
         <section className="preview" aria-label="Margin preview">
-          <div><span>Estimated profit</span><strong>{money(c.estGross)}</strong><em>{pct(c.estPct)}</em></div>
-          <div><span>Actual profit</span><strong>{c.grossActual === null ? "Needs labor paid" : money(c.grossActual)}</strong><em>{pct(c.actualPct)}</em></div>
-          <div><span>After commission</span><strong>{c.grossAfterCommission === null ? "–" : money(c.grossAfterCommission)}</strong><em>{pct(c.afterCommissionPct)}</em></div>
+          <div><span>Estimated after commission</span><strong>{money(c.estAfterCommission)}</strong><em>{pct(c.estAfterCommissionPct)}</em></div>
+          <div><span>Gross profit before commission</span><strong>{c.grossActual === null ? "Needs labor paid" : money(c.grossActual)}</strong><em>{pct(c.actualPct)}</em></div>
+          <div><span>Actual after commission</span><strong>{c.grossAfterCommission === null ? "–" : money(c.grossAfterCommission)}</strong><em>{pct(c.afterCommissionPct)}</em></div>
         </section>
       </div>
 

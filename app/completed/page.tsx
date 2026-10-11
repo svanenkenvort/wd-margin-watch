@@ -21,8 +21,8 @@ export default async function Completed({ searchParams }: { searchParams: Promis
           { label: "Jobs", value: String(s.count) },
           { label: "Sales", value: money(s.revenue) },
           { label: "Gross profit", value: money(s.gross) },
-          { label: "Margin", value: pct(s.grossPct), tone: s.grossPct !== null && s.grossPct < target ? "warn" : "good", note: `target ${pct(target, 0)}` },
-          { label: "After commissions", value: pct(s.afterCommissionPct) },
+          { label: "After commissions", value: money(s.afterCommission) },
+          { label: "Margin after commission", value: pct(s.afterCommissionPct), tone: s.afterCommissionPct !== null && s.afterCommissionPct < target ? "warn" : "good", note: `target ${pct(target, 0)}` },
           { label: "Unpaid balances", value: money(s.balance), tone: s.balance > 1 ? "low" : "good" },
         ]}
       />
