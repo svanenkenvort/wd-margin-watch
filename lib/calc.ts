@@ -17,9 +17,21 @@ export interface Computed {
   commissionOwed: number;
   grossAfterCommission: number | null;
   afterCommissionPct: number | null;
-  /** Hand-entered numbers still missing */
-  missing: string[];
+  /** What still has to be typed on this job, in the order to enter it */
+  missing: MissingField[];
+  /** Where the job and Builder Prime disagree */
+  checks: BpCheck[];
 }
+
+/** Each missing entry names the field it belongs to, so the screen can jump straight to it. */
+export interface MissingField {
+  field: "jobNumber" | "soldDate" | "contractValue" | "product" | "materialsEst" | "laborEst" | "laborActual";
+  label: string;
+}
+
+export type BpCheck =
+  | { kind: "payments"; builderPrime: number; entered: number }
+  | { kind: "complete"; on: string | null };
 
 export function repRate(settings: Settings, rep: string): number {
   return settings.reps.find((r) => r.name === rep)?.commissionRate ?? 0;
@@ -51,10 +63,18 @@ export function compute(job: Job, settings: Settings): Computed {
   const afterCommissionPct =
     grossAfterCommission !== null && g ? grossAfterCommission / g : null;
 
-  const missing: string[] = [];
-  if (job.materialsEst === null) missing.push("Materials est.");
-  if (job.laborEst === null) missing.push("Labor est.");
-  if (job.state === "completed" && job.laborActual === null) missing.push("Labor paid");
+  const missing: MissingField[] = [];
+  if (!job.jobNumber.trim()) missing.push({ field: "jobNumber", label: "ProVia Order #" });
+  if (!job.soldDate) missing.push({ field: "soldDate", label: "Date sold" });
+  if (!job.contractValue) missing.push({ field: "contractValue", label: "Contract value" });
+  if (!job.product.trim()) missing.push({ field: "product", label: "Product" });
+  if (job.materialsEst === null) missing.push({ field: "materialsEst", label: "Materials est." });
+  if (job.laborEst === null) missing.push({ field: "laborEst", label: "Labor est." });
+  if (job.state === "completed" && job.laborActual === null) missing.push({ field: "laborActual", label: "Labor paid" });
+
+  const checks: BpCheck[] = [];
+  if (job.bp?.paid != null && Math.abs(job.bp.paid - totalPayments) >= 0.5) checks.push({ kind: "payments", builderPrime: job.bp.paid, entered: totalPayments });
+  if (job.state === "open" && job.bp?.complete) checks.push({ kind: "complete", on: job.bp.completedOn });
 
   return {
     financeCharges,
@@ -72,5 +92,6 @@ export function compute(job: Job, settings: Settings): Computed {
     grossAfterCommission,
     afterCommissionPct,
     missing,
+    checks,
   };
 }

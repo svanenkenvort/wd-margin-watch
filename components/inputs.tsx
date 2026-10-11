@@ -78,6 +78,7 @@ export function NumField({
   label,
   allowEmpty = true,
   className = "",
+  id,
 }: {
   value: number | null;
   onCommit: (v: number | null) => void;
@@ -88,6 +89,7 @@ export function NumField({
   label: string;
   allowEmpty?: boolean;
   className?: string;
+  id?: string;
 }) {
   const shown = value === null ? "" : kind === "percent" ? trim(value * 100, 3) : trim(value, 2);
   const pretty = value === null ? "" : kind === "percent" ? trim(value * 100, 3) : value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -118,6 +120,7 @@ export function NumField({
     <span className={`numfield ${kind}${needed ? " needed" : ""} ${className}`}>
       {kind === "money" && <i aria-hidden="true">$</i>}
       <input
+        id={id}
         inputMode="decimal"
         aria-label={label}
         value={focus ? text : text}
@@ -139,6 +142,59 @@ export function NumField({
         }}
       />
       {kind === "percent" && <i aria-hidden="true">%</i>}
+    </span>
+  );
+}
+
+/* ---------- text and date fields that save when you leave them ---------- */
+export function TextField({ value, onCommit, label, placeholder, needed = false, upper = false, id }: { value: string; onCommit: (v: string) => void; label: string; placeholder?: string; needed?: boolean; upper?: boolean; id?: string }) {
+  const [text, setText] = useState(value);
+  const [focus, setFocus] = useState(false);
+  useEffect(() => {
+    if (!focus) setText(value);
+  }, [value, focus]);
+  const commit = () => {
+    setFocus(false);
+    const next = (upper ? text.toUpperCase() : text).trim();
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <span className={`textfield${needed && !text ? " needed" : ""}`}>
+      <input
+        id={id}
+        aria-label={label}
+        value={text}
+        placeholder={placeholder}
+        onFocus={() => setFocus(true)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") {
+            setText(value);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+    </span>
+  );
+}
+
+/** Saves when you leave the field, not on every keystroke (typing a year passes through odd dates). */
+export function DateCell({ value, onCommit, label, needed = false }: { value: string | null; onCommit: (v: string | null) => void; label: string; needed?: boolean }) {
+  const [text, setText] = useState(value ?? "");
+  useEffect(() => setText(value ?? ""), [value]);
+  return (
+    <span className={`textfield date${needed && !text ? " needed" : ""}`}>
+      <input
+        type="date"
+        aria-label={label}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          if ((text || null) !== value) onCommit(text || null);
+        }}
+      />
     </span>
   );
 }

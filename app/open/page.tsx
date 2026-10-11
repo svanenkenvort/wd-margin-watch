@@ -3,6 +3,7 @@ import { PageHead, Shell } from "@/components/Shell";
 import { Strip } from "@/components/Strip";
 import { SyncButton } from "@/components/SyncButton";
 import { loadAll, readParams } from "@/lib/data";
+import { readStore } from "@/lib/store";
 import { money, pct } from "@/lib/format";
 import { openRows, summarize } from "@/lib/stats";
 
@@ -11,13 +12,15 @@ export const dynamic = "force-dynamic";
 export default async function OpenJobs({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { rows, settings, years } = await loadAll();
   const { job } = await readParams(searchParams, years);
+  const { bpReview } = await readStore();
+  const review = (bpReview?.notInApp.length ?? 0) + (bpReview?.maybe.length ?? 0);
   const open = openRows(rows);
   const s = summarize(open);
   const needs = open.filter((r) => r.c.missing.length > 0).length;
   const target = settings.targetMargin;
   return (
-    <Shell active="open" actions={<SyncButton />}>
-      <PageHead title="Open jobs" sub="Type only the highlighted columns. Everything else comes from Builder Prime or is calculated." />
+    <Shell active="open" actions={<><a className="btn" href="/api/export/excel">Export to Excel</a><SyncButton /></>}>
+      <PageHead title="Open jobs" sub="Type only what is highlighted: the ProVia Order #, date sold and your estimates. Contract value and payments come from Builder Prime; the rest is calculated." />
       <Strip
         items={[
           { label: "Open jobs", value: String(open.length) },
@@ -25,10 +28,10 @@ export default async function OpenJobs({ searchParams }: { searchParams: Promise
           { label: "Collected so far", value: money(s.collected) },
           { label: "Still to collect", value: money(s.balance) },
           { label: "Estimated margin", value: pct(s.estPct), tone: s.estPct !== null && s.estPct < target ? "warn" : "good", note: `target ${pct(target, 0)}` },
-          { label: "Jobs needing numbers", value: String(needs), tone: needs ? "warn" : "good" },
+          { label: "Jobs with entries to make", value: String(needs), tone: needs ? "warn" : "good" },
         ]}
       />
-      <OpenJobsTable rows={open} settings={settings} initialJobId={job} />
+      <OpenJobsTable rows={open} settings={settings} initialJobId={job} review={review} />
     </Shell>
   );
 }

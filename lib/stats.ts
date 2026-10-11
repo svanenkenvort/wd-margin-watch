@@ -184,7 +184,7 @@ export function attention(rows: Row[], settings: Settings, year: number): Attent
   const open = openRows(rows);
   for (const { job, c } of open) {
     if (c.missing.length)
-      out.push({ id: `n-${job.id}`, jobId: job.id, kind: "numbers", tab: "open", title: `${job.name} needs numbers`, detail: `Add ${c.missing.join(" and ").toLowerCase()}` });
+      out.push({ id: `n-${job.id}`, jobId: job.id, kind: "numbers", tab: "open", title: `${job.name} needs numbers`, detail: `Add ${c.missing.map((m) => (m.field === "jobNumber" ? m.label : m.label.toLowerCase())).join(", ")}` });
   }
   for (const { job, c } of completedIn(rows, year)) {
     if (c.balance > 1)
@@ -195,6 +195,17 @@ export function attention(rows: Row[], settings: Settings, year: number): Attent
       out.push({ id: `l-${job.id}`, jobId: job.id, kind: "numbers", tab: "completed", title: `${job.name} has no labor paid`, detail: "Gross profit can't be finished without it" });
     if (job.completeDate && job.soldDate && job.completeDate < job.soldDate)
       out.push({ id: `d-${job.id}`, jobId: job.id, kind: "data", tab: "completed", title: `${job.name} finished before it sold`, detail: `Sold ${job.soldDate}, completed ${job.completeDate}` });
+  }
+  // where a job and Builder Prime disagree
+  const usd = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 } as Intl.NumberFormatOptions);
+  for (const { job, c } of [...open, ...completedIn(rows, year)]) {
+    for (const k of c.checks) {
+      const tab = job.state === "open" ? "open" : "completed";
+      if (k.kind === "payments")
+        out.push({ id: `p-${job.id}`, jobId: job.id, kind: "money", tab, title: `${job.name}: payments differ from Builder Prime`, detail: `Builder Prime shows ${usd(k.builderPrime)} paid, ${usd(k.entered)} entered here` });
+      else
+        out.push({ id: `k-${job.id}`, jobId: job.id, kind: "data", tab, title: `${job.name} is complete in Builder Prime`, detail: k.on ? `Completed ${k.on}. Click Complete when the install is done.` : "Click Complete when the install is done." });
+    }
   }
   // open jobs that are sold, deposit-less and old
   for (const { job } of open) {

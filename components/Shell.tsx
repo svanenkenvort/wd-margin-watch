@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { requireUser } from "@/lib/users";
+import { SignOutButton } from "./SignOutButton";
 
 const TABS = [
   { href: "/", label: "Overview", key: "overview" },
@@ -21,7 +23,8 @@ export function Logo({ size = 28 }: { size?: number }) {
   );
 }
 
-export function Shell({
+/** Every page: signed-in users only (a removed user is sent to sign in, even with a valid cookie). */
+export async function Shell({
   active,
   year,
   years,
@@ -34,6 +37,7 @@ export function Shell({
   children: ReactNode;
   actions?: ReactNode;
 }) {
+  const user = await requireUser();
   const withYear = (href: string) => (year && (active === "overview" || active === "completed" || active === "reports") ? `${href}?year=${year}` : href);
   return (
     <div className="app">
@@ -60,6 +64,10 @@ export function Shell({
             </div>
           ) : null}
           {actions}
+          <span className="user-menu">
+            {user.name}
+            <SignOutButton />
+          </span>
         </div>
       </header>
       <main className="page">{children}</main>

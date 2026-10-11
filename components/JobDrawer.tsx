@@ -5,6 +5,7 @@ import { compute } from "@/lib/calc";
 import { money, pct, todayISO } from "@/lib/format";
 import { STAGES, type Job, type Settings } from "@/lib/types";
 import { NumField, Overlay, useJobApi } from "./inputs";
+import { BpPanel, TodoPanel } from "./JobTodo";
 
 type Api = ReturnType<typeof useJobApi>;
 
@@ -18,8 +19,8 @@ function blank(): Job {
   };
 }
 
-function DateField({ value, onChange, label }: { value: string | null; onChange: (v: string | null) => void; label: string }) {
-  return <input type="date" aria-label={label} value={value ?? ""} onChange={(e) => onChange(e.target.value || null)} />;
+function DateField({ value, onChange, label, id, needed = false }: { value: string | null; onChange: (v: string | null) => void; label: string; id?: string; needed?: boolean }) {
+  return <input type="date" id={id} className={needed && !value ? "needed" : undefined} aria-label={label} value={value ?? ""} onChange={(e) => onChange(e.target.value || null)} />;
 }
 
 export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; settings: Settings; api: Api; onClose: () => void }) {
@@ -31,6 +32,22 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
   const c = useMemo(() => compute(d, settings), [d, settings]);
   const completed = d.state === "completed";
   const defaultRate = settings.reps.find((r) => r.name === d.rep)?.commissionRate;
+  const fromBp = !!d.builderPrimeId && !completed;
+
+  /** The deposit is taken at the sale, so an empty deposit date follows the sale date. */
+  const setSoldDate = (v: string | null) =>
+    setD((p) => ({ ...p, soldDate: v, depositDate: !p.depositDate && v && p.depositAmount > 0 && !p.financed ? v : p.depositDate }));
+
+  /** Builder Prime has more paid than entered: put the difference in the next empty payment. */
+  const addBpPayments = () => {
+    const diff = Math.round(((d.bp?.paid ?? 0) - c.totalPayments) * 100) / 100;
+    if (diff <= 0) return;
+    const slot = !d.depositAmount ? "deposit" : !d.stageAmount ? "stage" : "final";
+    if (slot === "deposit") setD((p) => ({ ...p, depositAmount: diff, depositDate: p.depositDate ?? p.soldDate }));
+    else if (slot === "stage") set("stageAmount", diff);
+    else set("finalAmount", (d.finalAmount || 0) + diff);
+    requestAnimationFrame(() => document.getElementById(`f-${slot}Date`)?.focus());
+  };
 
   const save = async () => {
     if (!d.name.trim()) return;
@@ -49,7 +66,8 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
           <h2>{creating ? "New job" : d.name || "Job"}</h2>
           {!creating && (
             <p className="sub">
-              Job {d.jobNumber || "–"} {d.source === "builderprime" ? "from Builder Prime" : d.source === "sheet" ? "imported from your spreadsheet" : "added by hand"}
+              {d.jobNumber ? `ProVia Order #${d.jobNumber}` : "No ProVia Order # yet"} ·{" "}
+              {d.builderPrimeJobNumber ? `Builder Prime job #${d.builderPrimeJobNumber}` : d.source === "sheet" ? "imported from your spreadsheet" : "added by hand"}
             </p>
           )}
         </div>
@@ -57,12 +75,14 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
       </header>
 
       <div className="drawer-body">
+        {!creating && <TodoPanel missing={c.missing} checks={c.checks} onUseBpPayments={addBpPayments} />}
+        {d.bp && <BpPanel bp={d.bp} jobNumber={d.builderPrimeJobNumber} />}
         <fieldset>
           <legend>Job</legend>
           <label className="field"><span>Customer name</span><input value={d.name} onChange={(e) => set("name", e.target.value)} placeholder="LAST NAME" autoFocus={creating} /></label>
           <div className="field-row">
-            <label className="field"><span>Job number</span><input value={d.jobNumber} onChange={(e) => set("jobNumber", e.target.value)} /></label>
-            <label className="field"><span>Product</span><input value={d.product} onChange={(e) => set("product", e.target.value.toUpperCase())} placeholder="W, PD, ED" /></label>
+            <label className="field"><span>Job number (ProVia Order #)</span><input id="f-jobNumber" className={d.jobNumber.trim() ? undefined : "needed"} value={d.jobNumber} onChange={(e) => set("jobNumber", e.target.value)} placeholder="e.g. 14651608" /></label>
+            <label className="field"><span>Product</span><input id="f-product" className={d.product.trim() ? undefined : "needed"} value={d.product} onChange={(e) => set("product", e.target.value.toUpperCase())} placeholder="W, PD, ED" /></label>
           </div>
           <div className="field-row">
             <label className="field">
@@ -70,7 +90,7 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
               <input list="reps" value={d.rep} onChange={(e) => set("rep", e.target.value.toUpperCase())} />
               <datalist id="reps">{settings.reps.map((r) => <option key={r.name} value={r.name} />)}</datalist>
             </label>
-            <label className="field"><span>Date sold</span><DateField value={d.soldDate} onChange={(v) => set("soldDate", v)} label="Date sold" /></label>
+            <label className="field"><span>Date sold</span><DateField id="f-soldDate" needed value={d.soldDate} onChange={setSoldDate} label="Date sold" /></label>
           </div>
           {!completed && (
             <label className="field">
@@ -89,20 +109,24 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
         <fieldset>
           <legend>Payments</legend>
           <div className="field-row">
-            <label className="field"><span>Contract value</span><NumField label="Contract value" value={d.contractValue} allowEmpty={false} onCommit={(v) => set("contractValue", v ?? 0)} /></label>
+            {fromBp ? (
+              <div className="field"><span>Contract value</span><p className="from-bp">{money(d.contractValue, true)} <small>from Builder Prime, updates on sync</small></p></div>
+            ) : (
+              <label className="field"><span>Contract value</span><NumField id="f-contractValue" label="Contract value" value={d.contractValue} needed={!d.contractValue} allowEmpty={false} onCommit={(v) => set("contractValue", v ?? 0)} /></label>
+            )}
             <label className="field check"><input type="checkbox" checked={d.financed} onChange={(e) => set("financed", e.target.checked)} /><span>Financed (no deposit date)</span></label>
           </div>
           <div className="field-row">
             <label className="field"><span>Deposit</span><NumField label="Deposit" value={d.depositAmount} onCommit={(v) => set("depositAmount", v ?? 0)} /></label>
-            <label className="field"><span>Deposit date</span><DateField value={d.depositDate} onChange={(v) => set("depositDate", v)} label="Deposit date" /></label>
+            <label className="field"><span>Deposit date</span><DateField id="f-depositDate" value={d.depositDate} onChange={(v) => set("depositDate", v)} label="Deposit date" /></label>
           </div>
           <div className="field-row">
             <label className="field"><span>Stage payment</span><NumField label="Stage payment" value={d.stageAmount} onCommit={(v) => set("stageAmount", v ?? 0)} /></label>
-            <label className="field"><span>Stage payment date</span><DateField value={d.stageDate} onChange={(v) => set("stageDate", v)} label="Stage payment date" /></label>
+            <label className="field"><span>Stage payment date</span><DateField id="f-stageDate" value={d.stageDate} onChange={(v) => set("stageDate", v)} label="Stage payment date" /></label>
           </div>
           <div className="field-row">
             <label className="field"><span>Final payment</span><NumField label="Final payment" value={d.finalAmount} onCommit={(v) => set("finalAmount", v ?? 0)} /></label>
-            <label className="field"><span>Final payment date</span><DateField value={d.finalDate} onChange={(v) => set("finalDate", v)} label="Final payment date" /></label>
+            <label className="field"><span>Final payment date</span><DateField id="f-finalDate" value={d.finalDate} onChange={(v) => set("finalDate", v)} label="Final payment date" /></label>
           </div>
           <p className="readout">Paid {money(c.totalPayments, true)}. Balance owed <strong className={c.balance > 1 ? "low" : ""}>{money(c.balance, true)}</strong></p>
         </fieldset>
@@ -110,12 +134,12 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
         <fieldset className="entry">
           <legend>Costs you enter</legend>
           <div className="field-row">
-            <label className="field"><span>Materials estimate</span><NumField label="Materials estimate" value={d.materialsEst} needed={d.materialsEst === null} onCommit={(v) => set("materialsEst", v)} /></label>
-            <label className="field"><span>Labor estimate</span><NumField label="Labor estimate" value={d.laborEst} needed={d.laborEst === null} onCommit={(v) => set("laborEst", v)} /></label>
+            <label className="field"><span>Materials estimate{d.bp?.cost ? <small className="muted"> · Builder Prime cost {money(d.bp.cost, true)}</small> : null}</span><NumField id="f-materialsEst" label="Materials estimate" value={d.materialsEst} needed={d.materialsEst === null} onCommit={(v) => set("materialsEst", v)} /></label>
+            <label className="field"><span>Labor estimate</span><NumField id="f-laborEst" label="Labor estimate" value={d.laborEst} needed={d.laborEst === null} onCommit={(v) => set("laborEst", v)} /></label>
           </div>
           <div className="field-row">
             <label className="field"><span>Materials paid to supplier</span><NumField label="Materials paid to supplier" value={d.materialsPaid} onCommit={(v) => set("materialsPaid", v)} /></label>
-            <label className="field"><span>Labor paid</span><NumField label="Labor paid" value={d.laborActual} needed={completed && d.laborActual === null} onCommit={(v) => set("laborActual", v)} /></label>
+            <label className="field"><span>Labor paid</span><NumField id="f-laborActual" label="Labor paid" value={d.laborActual} needed={completed && d.laborActual === null} onCommit={(v) => set("laborActual", v)} /></label>
           </div>
           <div className="field-row">
             <label className="field"><span>Finance charge</span><NumField kind="percent" label="Finance charge percent" value={d.financePct} allowEmpty={false} onCommit={(v) => set("financePct", v ?? 0)} /></label>
