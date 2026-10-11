@@ -1,9 +1,11 @@
-import { body, fail, messageOf, ok } from "@/lib/api";
+import { body, fail, messageOf, ok, signedOut } from "@/lib/api";
 import { completeJob, type CompleteInput } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await signedOut();
+  if (denied) return denied;
   const { id } = await params;
   const input = await body<CompleteInput>(req);
   if (!input?.completeDate || !/^\d{4}-\d{2}-\d{2}$/.test(input.completeDate)) return fail("Pick the date the install was completed.");

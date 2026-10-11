@@ -1,3 +1,5 @@
+import type { BpProject } from "./bp-mapping";
+
 export type Stage =
   | "awaitingDeposit"
   | "needsMeasure"
@@ -115,6 +117,31 @@ export interface StoreData {
   bpReview?: BpReview | null;
   /** Projects you chose to leave out of the app. */
   bpIgnored?: string[];
+  /** A sync in progress (it runs in short steps), so it can carry on where it stopped. */
+  bpSync?: {
+    startedAt: number;
+    fetched: number;
+    sold: BpProject[];
+    /** Project ids whose details still need reading, in order; `next` is how far it got. */
+    toRead: string[];
+    next: number;
+    detailsRead: number;
+    /** The step working on it now, and until when. */
+    leaseUntil: number | null;
+    leaseId: string | null;
+  } | null;
+  /** People who can sign in. */
+  users?: User[];
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  /** scrypt$salt$hash */
+  passwordHash: string;
+  admin: boolean;
+  createdAt: string;
 }
 
 export const STAGES: { key: Stage; label: string; color: string }[] = [

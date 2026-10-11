@@ -1,3 +1,4 @@
+import { signedOut } from "@/lib/api";
 import { jobsToCsv } from "@/lib/csv";
 import { readStore } from "@/lib/store";
 import { completedIn, openRows, toRows } from "@/lib/stats";
@@ -6,6 +7,8 @@ export const dynamic = "force-dynamic";
 
 /** /api/export?year=2026 downloads that year's completed jobs; ?scope=open downloads the open jobs. */
 export async function GET(req: Request) {
+  const denied = await signedOut();
+  if (denied) return denied;
   const url = new URL(req.url);
   const { jobs, settings } = await readStore();
   const rows = toRows(jobs, settings);

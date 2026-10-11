@@ -1,10 +1,12 @@
-import { body, fail, messageOf, ok } from "@/lib/api";
+import { body, fail, messageOf, ok, signedOut } from "@/lib/api";
 import { updateSettings } from "@/lib/store";
 import type { Settings } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(req: Request) {
+  const denied = await signedOut();
+  if (denied) return denied;
   const patch = await body<Partial<Settings>>(req);
   if (!patch) return fail("Send the settings as JSON.");
   const next: Partial<Settings> = {};

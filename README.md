@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Your 2025 and 2026 jobs (343 jobs from the spreadsheet) are already loaded.
+Open http://localhost:3000 and sign in (copy `.env.example` to `.env.local` first and set `ADMIN_EMAIL` / `ADMIN_PASSWORD`). Your 2025 and 2026 jobs (343 jobs from the spreadsheet) are already loaded.
 
 ## Your daily routine
 
@@ -22,7 +22,7 @@ Open http://localhost:3000. Your 2025 and 2026 jobs (343 jobs from the spreadshe
 
 ## Builder Prime
 
-Settings: address `https://windowdepotnew.builderprime.com`, key in `.env.local` (never committed).
+Settings: address `https://windowdepotnew.builderprime.com`, key in `.env.local` locally or in Vercel's environment variables (never committed).
 
 **What comes from Builder Prime** (checked against the live API on 2026-10-10):
 
@@ -65,16 +65,20 @@ row, and each row says what else is missing. Opening a job shows a "Still to ent
 - `lib/calc.ts`: every spreadsheet formula (finance charge, estimated and actual gross profit, commission owed).
 - `lib/stats.ts`: totals, months, reps, products, "needs a look" list.
 - `lib/builderprime.ts` and `lib/bp-mapping.ts`: the Builder Prime sync and the project fields it reads.
-- `lib/store.ts`: all saving. Currently `data/store.json` (not committed).
+- `lib/store.ts`: all saving: Postgres when `DATABASE_URL` is set, otherwise `data/store.json` (not committed).
+- `lib/session.ts`, `lib/users.ts`, `middleware.ts`: sign-in. `lib/excel.ts`: the Excel export.
 - `scripts/import_xlsx.py`: re-import the spreadsheet if you ever need to (`python3 scripts/import_xlsx.py file.xlsx`).
 
-## Deploying to Vercel later
+## Deploying, signing in, and where the data lives
 
-Vercel cannot write to a file, so before deploying swap `readStore` and `writeStore` in `lib/store.ts`
-for a hosted database (Vercel Postgres/Neon or Upstash Redis), add `BUILDERPRIME_API_KEY` and
-`BUILDERPRIME_SUBDOMAIN` as Vercel environment variables, and add a login (the app has none yet,
-and it shows your sales and margins). Until the database exists the app refuses to save on Vercel
-and says why.
+**DEPLOY.md** walks through putting the app on Vercel at dashboard.windowdepotnew.com.
+
+- **Sign in:** everyone signs in with an email and password. Admins add and remove people under
+  Settings → People who can sign in. The first admin comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+- **Data:** on Vercel it lives in a Neon Postgres database (`DATABASE_URL`), so deploys and syncs
+  never lose it. On your computer, without `DATABASE_URL`, it is `data/store.json`.
+- **Export:** Settings → Your data → **Export everything to Excel** (also on Open jobs), or download
+  a raw backup file that `scripts/upload-store.mjs` can load back.
 
 ## Spreadsheet differences worth knowing
 

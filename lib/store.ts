@@ -1,14 +1,18 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
+import { neon } from "@neondatabase/serverless";
 import type { Job, Settings, StoreData } from "./types";
 
 /**
- * Storage layer. Everything the app saves goes through this file, so moving to a
- * hosted database for Vercel means replacing readStore/writeStore only.
- * Locally it is a single JSON file at data/store.json.
+ * Storage layer. Everything the app saves goes through readStore and mutate.
+ * - On Vercel (or whenever DATABASE_URL is set): one row in Postgres (Neon), table
+ *   margin_watch_store, holding the whole data set as JSON. Saves use a version number, so two
+ *   people saving at once can't overwrite each other: the later save is redone on the newer data.
+ * - Otherwise (local development): a JSON file at data/store.json.
  */
 const FILE = process.env.DATA_FILE ?? path.join(process.cwd(), "data", "store.json");
+const DB_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 
 const EDITABLE: (keyof Job)[] = [
   "jobNumber", "name", "product", "rep", "soldDate", "stage", "completeDate", "reportYear",
@@ -24,41 +28,98 @@ const DEFAULT_SETTINGS: Settings = {
   builderPrime: { subdomain: "windowdepotnew", lastSync: null },
 };
 
-let queue: Promise<unknown> = Promise.resolve();
+const empty = (): StoreData => ({ version: 1, settings: DEFAULT_SETTINGS, jobs: [] });
+const withDefaults = (data: StoreData): StoreData => ({ ...data, settings: { ...DEFAULT_SETTINGS, ...data.settings } });
 
-export async function readStore(): Promise<StoreData> {
+/* ---------- Postgres ---------- */
+
+const sql = DB_URL ? neon(DB_URL) : null;
+let tableReady: Promise<unknown> | null = null;
+const ensureTable = () =>
+  (tableReady ??= sql!`CREATE TABLE IF NOT EXISTS margin_watch_store (
+    id integer PRIMARY KEY,
+    data jsonb NOT NULL,
+    version integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`.catch((e) => {
+    tableReady = null;
+    throw e;
+  }));
+
+async function dbRead(): Promise<{ data: StoreData; version: number | null }> {
+  await ensureTable();
+  const rows = (await sql!`SELECT data, version FROM margin_watch_store WHERE id = 1`) as { data: StoreData; version: number }[];
+  return rows.length ? { data: rows[0].data, version: rows[0].version } : { data: empty(), version: null };
+}
+
+/** Saves only if nobody else saved since `version` was read. Returns false if someone did. */
+async function dbWrite(data: StoreData, version: number | null): Promise<boolean> {
+  const json = JSON.stringify(data);
+  const rows =
+    version === null
+      ? await sql!`INSERT INTO margin_watch_store (id, data, version) VALUES (1, ${json}::jsonb, 1) ON CONFLICT (id) DO NOTHING RETURNING version`
+      : await sql!`UPDATE margin_watch_store SET data = ${json}::jsonb, version = version + 1, updated_at = now() WHERE id = 1 AND version = ${version} RETURNING version`;
+  return (rows as unknown[]).length === 1;
+}
+
+/** Replaces everything (used by the restore script). */
+export async function replaceStore(data: StoreData): Promise<void> {
+  if (!sql) return writeFile(data);
+  await ensureTable();
+  const json = JSON.stringify(data);
+  await sql`INSERT INTO margin_watch_store (id, data, version) VALUES (1, ${json}::jsonb, 1)
+    ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, version = margin_watch_store.version + 1, updated_at = now()`;
+}
+
+/* ---------- local file ---------- */
+
+async function readFile(): Promise<StoreData> {
   try {
-    const raw = await fs.readFile(FILE, "utf8");
-    const data = JSON.parse(raw) as StoreData;
-    data.settings = { ...DEFAULT_SETTINGS, ...data.settings };
-    return data;
+    return JSON.parse(await fs.readFile(FILE, "utf8")) as StoreData;
   } catch (e: unknown) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: 1, settings: DEFAULT_SETTINGS, jobs: [] };
-    }
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return empty();
     throw e;
   }
 }
 
-async function writeStore(data: StoreData): Promise<void> {
-  if (process.env.VERCEL) {
-    throw new Error(
-      "This deployment has no database yet. Connect a database in lib/store.ts before saving on Vercel.",
-    );
-  }
+async function writeFile(data: StoreData): Promise<void> {
+  if (process.env.VERCEL) throw new Error("No database is connected. Add a Neon Postgres database to the Vercel project (see DEPLOY.md).");
   await fs.mkdir(path.dirname(FILE), { recursive: true });
   const tmp = `${FILE}.${process.pid}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(data, null, 1), "utf8");
   await fs.rename(tmp, FILE);
 }
 
-/** Run a read-modify-write one at a time so quick edits never overwrite each other. */
+/* ---------- public ---------- */
+
+export async function readStore(): Promise<StoreData> {
+  return withDefaults(sql ? (await dbRead()).data : await readFile());
+}
+
+export const storageKind = () => (sql ? "database" : "file");
+
+let queue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Read, change, save. `fn` may run more than once (if someone else saved in between, it is redone
+ * on the newer data), so it must only change `data` and return a result, nothing else.
+ */
 export function mutate<T>(fn: (data: StoreData) => T | Promise<T>): Promise<T> {
   const run = queue.then(async () => {
-    const data = await readStore();
-    const result = await fn(data);
-    await writeStore(data);
-    return result;
+    if (!sql) {
+      const data = withDefaults(await readFile());
+      const result = await fn(data);
+      await writeFile(data);
+      return result;
+    }
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const { data, version } = await dbRead();
+      const working = withDefaults(data);
+      const result = await fn(working);
+      if (await dbWrite(working, version)) return result;
+      await new Promise((r) => setTimeout(r, 50 + Math.random() * 150));
+    }
+    throw new Error("Couldn't save because others kept saving at the same moment. Try again.");
   });
   queue = run.catch(() => undefined);
   return run;

@@ -14,59 +14,36 @@ export interface SyncResult {
   review: { notInApp: number; maybe: number };
 }
 
-interface Progress {
-  running: boolean;
-  step: "list" | "details" | "saving" | "";
+type Step =
+  | { status: "working" | "wait" | "busy"; step: "list" | "details"; done: number; total: number; waitMs: number }
+  | { status: "done"; report: SyncResult };
+
+interface Shown {
+  kind: "list" | "details" | "wait" | "busy";
   done: number;
   total: number;
-  waitLeft: number;
-  last: { at: string; report?: SyncResult; error?: string } | null;
 }
 
 /**
- * Runs a Builder Prime sync and follows it: polls its progress every second and counts down
- * while Builder Prime makes it wait. A page opened during a sync (started elsewhere) picks it up too.
+ * Runs a Builder Prime sync as a series of short steps (each one request), and shows where it is.
+ * When Builder Prime makes it wait, it counts down and then carries on. Leaving the page stops
+ * asking; the next sync carries on from where it got to.
  */
 export function useSync(onFinished: (result: SyncResult | null, error: string | null) => void) {
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const [running, setRunning] = useState(false);
+  const [shown, setShown] = useState<Shown | null>(null);
   const [waitEnd, setWaitEnd] = useState<number | null>(null);
   const [, tick] = useState(0);
-  const following = useRef(false);
+  const alive = useRef(true);
   const finished = useRef(onFinished);
   finished.current = onFinished;
 
-  const poll = useCallback(async () => {
-    const p: Progress | null = await fetch("/api/builderprime/progress", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    if (!p) return null;
-    setProgress(p);
-    setWaitEnd(p.waitLeft > 0 ? Date.now() + p.waitLeft : null);
-    return p;
-  }, []);
-
-  /** Polls until the sync stops; reports the result when this page didn't start it. */
-  const follow = useCallback(
-    async (startedHere: boolean) => {
-      if (following.current) return;
-      following.current = true;
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const p = await poll();
-        if (p && !p.running) break;
-      }
-      following.current = false;
-      if (!startedHere) {
-        const last = (await poll())?.last;
-        finished.current(last?.report ?? null, last?.error ?? null);
-      }
-    },
-    [poll],
-  );
-
   useEffect(() => {
-    poll().then((p) => {
-      if (p?.running) follow(false);
-    });
-  }, [poll, follow]);
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   // Redraw the countdown every quarter second while waiting.
   useEffect(() => {
@@ -76,30 +53,57 @@ export function useSync(onFinished: (result: SyncResult | null, error: string | 
   }, [waitEnd]);
 
   const start = useCallback(async () => {
-    setProgress({ running: true, step: "list", done: 0, total: 0, waitLeft: 0, last: null });
-    follow(true);
+    setRunning(true);
+    setShown({ kind: "list", done: 0, total: 0 });
+    let total = 0;
+    let done = 0;
     try {
-      const res = await fetch("/api/builderprime", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) finished.current(data as SyncResult, null);
-      else finished.current(null, data.error ?? "Builder Prime didn't answer.");
+      while (alive.current) {
+        const res = await fetch("/api/builderprime", { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          finished.current(null, data.error ?? "Builder Prime didn't answer.");
+          break;
+        }
+        const step = data as Step;
+        if (step.status === "done") {
+          finished.current(step.report, null);
+          break;
+        }
+        if (step.total) {
+          total = step.total;
+          done = step.done;
+        }
+        if (step.status === "working") {
+          setShown({ kind: step.step, done, total });
+          continue;
+        }
+        setShown({ kind: step.status, done, total });
+        const end = Date.now() + step.waitMs;
+        setWaitEnd(end);
+        while (alive.current && Date.now() < end) await new Promise((r) => setTimeout(r, 250));
+        setWaitEnd(null);
+      }
     } catch {
-      finished.current(null, "Couldn't reach the app. Check that it is still running.");
+      finished.current(null, "Couldn't reach the app. Check your connection and sync again; it carries on where it stopped.");
     }
-    await poll();
-  }, [follow, poll]);
+    if (alive.current) {
+      setRunning(false);
+      setShown(null);
+      setWaitEnd(null);
+    }
+  }, []);
 
-  const running = !!progress?.running;
   const secondsLeft = waitEnd ? Math.max(0, Math.ceil((waitEnd - Date.now()) / 1000)) : 0;
-  return { start, running, status: running && progress ? statusText(progress, secondsLeft) : "", waiting: running && secondsLeft > 0 };
+  return { start, running, status: running && shown ? statusText(shown, secondsLeft) : "", waiting: running && secondsLeft > 0 };
 }
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-function statusText(p: Progress, secondsLeft: number): string {
-  const where = p.step === "details" && p.total ? `${p.done} of ${p.total} jobs read` : p.step === "saving" ? "saving" : "reading the project list";
-  if (secondsLeft > 0) return `Builder Prime rate limit: waiting ${clock(secondsLeft)}, then carrying on (${where})`;
-  if (p.step === "details") return p.total ? `Reading job details from Builder Prime: ${p.done} of ${p.total}` : "Reading job details from Builder Prime";
-  if (p.step === "saving") return "Saving…";
+function statusText(s: Shown, secondsLeft: number): string {
+  const where = s.total ? `${s.done} of ${s.total} jobs read` : "reading the project list";
+  if (s.kind === "wait") return `Builder Prime rate limit: waiting ${clock(secondsLeft)}, then carrying on (${where})`;
+  if (s.kind === "busy") return `Another sync is running: checking again in ${clock(secondsLeft)}`;
+  if (s.kind === "details") return s.total ? `Reading job details from Builder Prime: ${s.done} of ${s.total}` : "Reading job details from Builder Prime";
   return "Reading the Builder Prime project list…";
 }

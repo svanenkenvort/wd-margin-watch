@@ -1,12 +1,14 @@
 import { asDate, customerName, isComplete, isSold, productCode, repName, sameCustomer, startStage, type BpProject, type BpProjectDetail } from "./bp-mapping";
+import { randomUUID } from "crypto";
 import { blankJob, mutate, readStore } from "./store";
 import type { BpCandidate, BpReview, BpSnapshot, Job, Settings, StoreData } from "./types";
 
 /**
  * Builder Prime Open API client. Only reads.
- * Base URL: https://{subdomain}.builderprime.com   Auth: x-api-key header (set in .env.local).
+ * Base URL: https://{subdomain}.builderprime.com   Auth: x-api-key header (environment variable).
  * Builder Prime allows roughly 80 requests before it answers 429 with a Retry-After of about 40
- * seconds, so requests go one at a time and wait when told to.
+ * seconds. A sync runs as short steps (see syncStep), so on Vercel no request runs long, and a
+ * rate-limit wait is handed back to the screen to count down instead of being slept through.
  */
 export function bpConfig(settings: Settings) {
   const key = process.env.BUILDERPRIME_API_KEY ?? "";
@@ -20,53 +22,29 @@ export class BpError extends Error {
   }
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Where a running sync is, for the screen to show. Kept on globalThis because each API route is
- * bundled separately and would otherwise see its own copy of this module.
- */
-export interface SyncProgress {
-  running: boolean;
-  step: "list" | "details" | "saving" | "";
-  done: number;
-  total: number;
-  /** While Builder Prime makes us wait (429): when the wait ends, in epoch ms. */
-  waitUntil: number | null;
-  /** The last finished sync, so a page that didn't start it can still say how it went. */
-  last: { at: string; report?: SyncReport; error?: string } | null;
+/** Builder Prime said to wait (429). */
+export class BpRateLimited extends BpError {
+  constructor(public waitMs: number) {
+    super(`Builder Prime asked the app to wait ${Math.ceil(waitMs / 1000)} seconds before asking again. Try again then.`, 429);
+  }
 }
-const g = globalThis as unknown as { __bpSync?: SyncProgress };
-export const syncProgress = (): SyncProgress => g.__bpSync ?? { running: false, step: "", done: 0, total: 0, waitUntil: null, last: null };
-const setProgress = (p: Partial<SyncProgress>) => {
-  g.__bpSync = { ...syncProgress(), ...p };
-};
 
 async function bpGet(settings: Settings, path: string, params: Record<string, string> = {}): Promise<unknown> {
   const cfg = bpConfig(settings);
-  if (!cfg.hasKey) throw new BpError("No API key found. Add BUILDERPRIME_API_KEY to .env.local and restart the app.");
+  if (!cfg.hasKey) throw new BpError("No Builder Prime API key found. Add BUILDERPRIME_API_KEY to the environment variables and redeploy.");
   const url = new URL(path, cfg.base);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  for (let attempt = 0; ; attempt++) {
-    let res: Response;
-    try {
-      res = await fetch(url, { headers: { "x-api-key": cfg.key, Accept: "application/json" }, cache: "no-store" });
-    } catch (e) {
-      throw new BpError(`Could not reach ${cfg.base}. ${(e as Error).message}`);
-    }
-    if (res.status === 429 && attempt < 8) {
-      const wait = Math.min(Number(res.headers.get("retry-after")) || 30, 120);
-      if (syncProgress().running) setProgress({ waitUntil: Date.now() + (wait + 1) * 1000 });
-      await sleep((wait + 1) * 1000);
-      if (syncProgress().running) setProgress({ waitUntil: null });
-      continue;
-    }
-    if (res.status === 401 || res.status === 403)
-      throw new BpError("Builder Prime rejected the API key. Check the key and that it has permission to read projects.", res.status);
-    if (res.status === 429) throw new BpError("Builder Prime is limiting requests right now. Try the sync again in a few minutes.", 429);
-    if (!res.ok) throw new BpError(`Builder Prime answered ${res.status} ${res.statusText}.`, res.status);
-    return res.json();
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { "x-api-key": cfg.key, Accept: "application/json" }, cache: "no-store" });
+  } catch (e) {
+    throw new BpError(`Could not reach ${cfg.base}. ${(e as Error).message}`);
   }
+  if (res.status === 429) throw new BpRateLimited(((Number(res.headers.get("retry-after")) || 30) + 1) * 1000);
+  if (res.status === 401 || res.status === 403)
+    throw new BpError("Builder Prime rejected the API key. Check the key and that it has permission to read projects.", res.status);
+  if (!res.ok) throw new BpError(`Builder Prime answered ${res.status} ${res.statusText}.`, res.status);
+  return res.json();
 }
 
 /** Every project. Builder Prime pages from page=0 with at most limit=100, and needs both. */
@@ -282,40 +260,122 @@ function couldBe(j: Job, p: BpProject, isNewSale: boolean): boolean {
   return !created || !j.soldDate || j.soldDate >= daysBefore(created, 7);
 }
 
-export async function syncProjects(settings: Settings): Promise<SyncReport> {
-  if (syncProgress().running) throw new BpError("A Builder Prime sync is already running. It can take a few minutes the first time.", 409);
-  setProgress({ running: true, step: "list", done: 0, total: 0, waitUntil: null });
-  try {
-    const projects = await fetchProjects(settings);
-    const sold = projects.filter(isSold);
-    const before = await readStore();
-    const cache: Cache = { ...(before.bpCache ?? {}) };
+/** The fields the sync keeps between steps (the full records are much larger). */
+function slim(p: BpProject): BpProject {
+  return {
+    id: p.id, companySequenceNumber: p.companySequenceNumber, projectName: p.projectName, clientFirstName: p.clientFirstName,
+    clientLastName: p.clientLastName, clientCompanyName: p.clientCompanyName, salesPersonFirstName: p.salesPersonFirstName,
+    salesPersonLastName: p.salesPersonLastName, projectTypeDescription: p.projectTypeDescription, projectStatusDescription: p.projectStatusDescription,
+    projectStatusCategoryDescription: p.projectStatusCategoryDescription, projectStatusIsCancelled: p.projectStatusIsCancelled,
+    materialCost: p.materialCost, createdDate: p.createdDate, lastModifiedDate: p.lastModifiedDate, completionDateTime: p.completionDateTime,
+  };
+}
+
+/** Work per step, well inside Vercel's time limit for a request. */
+const STEP_MS = 25_000;
+/** A step holds the sync this long, so two people pressing Sync don't read the same projects twice. */
+const LEASE_MS = 45_000;
+/** An unfinished sync older than this starts over (the project list may have changed). */
+const STALE_MS = 60 * 60_000;
+
+export type SyncStep =
+  | { status: "working" | "wait" | "busy"; step: "list" | "details"; done: number; total: number; waitMs: number }
+  | { status: "done"; report: SyncReport };
+
+type Session = NonNullable<StoreData["bpSync"]>;
+
+/**
+ * One step of a sync. The screen calls this until it says "done":
+ * - the first step reads the project list and works out which projects need their details read;
+ * - each step then reads details for about 25 seconds and saves them;
+ * - "wait": Builder Prime's rate limit; call again after waitMs (progress so far is saved);
+ * - "busy": someone else's step is running; call again after waitMs;
+ * - the last step places every project (links, new open jobs, review list) and saves.
+ * Closing the page mid-sync loses nothing: the next sync carries on where this one stopped.
+ */
+export async function syncStep(settings: Settings): Promise<SyncStep> {
+  const t0 = Date.now();
+  const fresh = (d: StoreData) => (d.bpSync && Date.now() - d.bpSync.startedAt <= STALE_MS ? d.bpSync : null);
+
+  const before = await readStore();
+  const current = fresh(before);
+  if (current?.leaseUntil && current.leaseUntil > t0)
+    return { status: "busy", step: "details", done: current.next, total: current.toRead.length, waitMs: current.leaseUntil - t0 };
+  let started: Session | null = null;
+  if (!current) {
+    let projects: BpProject[];
+    try {
+      projects = await fetchProjects(settings);
+    } catch (e) {
+      if (e instanceof BpRateLimited) return { status: "wait", step: "list", done: 0, total: 0, waitMs: e.waitMs };
+      throw e;
+    }
+    const sold = projects.filter(isSold).map(slim);
     const linked = new Map(before.jobs.filter((j) => j.builderPrimeId).map((j) => [j.builderPrimeId!, j]));
-    const report: SyncReport = { firstSync: false, fetched: projects.length, sold: sold.length, detailsRead: 0, created: 0, linked: 0, updated: 0, changes: [], review: { notInApp: 0, maybe: 0 } };
-    const toRead = sold.filter((p) => needsDetail(p, cache[String(p.id)], linked.get(String(p.id))));
-    setProgress({ step: "details", done: 0, total: toRead.length });
-    for (const p of toRead) {
-      const id = String(p.id);
+    const toRead = sold.filter((p) => needsDetail(p, before.bpCache?.[String(p.id)], linked.get(String(p.id)))).map((p) => String(p.id));
+    started = { startedAt: t0, fetched: projects.length, sold, toRead, next: 0, detailsRead: 0, leaseUntil: null, leaseId: null };
+  }
+
+  // Take the sync for this step.
+  const leaseId = randomUUID();
+  const claim = await mutate((d): { busy: number } | { session: Session } | null => {
+    const cur = fresh(d);
+    if (cur?.leaseUntil && cur.leaseUntil > Date.now()) return { busy: cur.leaseUntil - Date.now() };
+    const session = cur ?? started;
+    if (!session) return null;
+    d.bpSync = { ...session, leaseUntil: Date.now() + LEASE_MS, leaseId };
+    return { session: d.bpSync };
+  });
+  if (!claim) return { status: "working", step: "list", done: 0, total: 0, waitMs: 0 };
+  if ("busy" in claim) return { status: "busy", step: "details", done: 0, total: 0, waitMs: claim.busy };
+  const session = claim.session;
+
+  // Read details until the step's time is up, Builder Prime says wait, or all are read.
+  const got: Cache = {};
+  const byId = new Map(session.sold.map((p) => [String(p.id), p]));
+  let next = session.next;
+  let waitMs = 0;
+  try {
+    while (next < session.toRead.length && Date.now() - t0 < STEP_MS) {
+      const id = session.toRead[next];
       const detail = await fetchDetail(settings, id);
-      cache[id] = {
-        modified: p.lastModifiedDate ?? null,
+      got[id] = {
+        modified: byId.get(id)?.lastModifiedDate ?? null,
         contracted: num(detail.totalContractedAmount),
         invoiced: num(detail.totalInvoicedAmount),
         paid: num(detail.totalPaidAmount),
       };
-      report.detailsRead++;
-      setProgress({ done: report.detailsRead });
+      next++;
     }
-    setProgress({ step: "saving" });
-    await mutate((d) => place(d, sold, cache, report));
-    setProgress({ last: { at: new Date().toISOString(), report } });
-    return report;
   } catch (e) {
-    setProgress({ last: { at: new Date().toISOString(), error: (e as Error).message } });
-    throw e;
-  } finally {
-    setProgress({ running: false, step: "", waitUntil: null });
+    if (!(e instanceof BpRateLimited)) {
+      await mutate((d) => {
+        d.bpCache = { ...(d.bpCache ?? {}), ...got };
+        if (d.bpSync?.leaseId === leaseId) d.bpSync = { ...d.bpSync, next, leaseUntil: null, leaseId: null };
+      });
+      throw e;
+    }
+    waitMs = e.waitMs;
   }
+
+  // Save what was read; on the last step, place every project.
+  const result = await mutate((d): { report: SyncReport } | { done: number; total: number } | null => {
+    d.bpCache = { ...(d.bpCache ?? {}), ...got };
+    const cur = d.bpSync;
+    if (!cur || cur.leaseId !== leaseId) return null;
+    const read = cur.detailsRead + Object.keys(got).length;
+    if (next < cur.toRead.length) {
+      d.bpSync = { ...cur, next, detailsRead: read, leaseUntil: null, leaseId: null };
+      return { done: next, total: cur.toRead.length };
+    }
+    const report: SyncReport = { firstSync: false, fetched: cur.fetched, sold: cur.sold.length, detailsRead: read, created: 0, linked: 0, updated: 0, changes: [], review: { notInApp: 0, maybe: 0 } };
+    place(d, cur.sold, d.bpCache, report);
+    d.bpSync = null;
+    return { report };
+  });
+  if (!result) return { status: "working", step: "details", done: next, total: session.toRead.length, waitMs: 0 };
+  if ("report" in result) return { status: "done", report: result.report };
+  return { status: waitMs ? "wait" : "working", step: "details", done: result.done, total: result.total, waitMs };
 }
 
 /** Reads the project list only (a few requests) and says what a sync would do. Saves nothing. */

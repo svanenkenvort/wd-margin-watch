@@ -172,7 +172,7 @@ export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp
         {syncer.running && (
           <div className={`sync-panel${syncer.waiting ? " waiting" : ""}`} role="status" aria-live="polite">
             <strong>{syncer.status}</strong>
-            <p className="hint">Builder Prime answers about 80 requests, then makes the app wait about 40 seconds. The first sync reads every sold project, so it takes a few minutes. You can leave this page; the sync keeps going.</p>
+            <p className="hint">Builder Prime answers about 80 requests, then makes the app wait about 40 seconds. The first sync reads every sold project, so it takes a few minutes. Keep this page open until it finishes; if you leave, the next sync carries on where it stopped.</p>
           </div>
         )}
         {test && (

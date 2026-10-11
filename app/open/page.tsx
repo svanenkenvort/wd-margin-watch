@@ -19,7 +19,7 @@ export default async function OpenJobs({ searchParams }: { searchParams: Promise
   const needs = open.filter((r) => r.c.missing.length > 0).length;
   const target = settings.targetMargin;
   return (
-    <Shell active="open" actions={<SyncButton />}>
+    <Shell active="open" actions={<><a className="btn" href="/api/export/excel">Export to Excel</a><SyncButton /></>}>
       <PageHead title="Open jobs" sub="Type only what is highlighted: the ProVia Order #, date sold and your estimates. Contract value and payments come from Builder Prime; the rest is calculated." />
       <Strip
         items={[
