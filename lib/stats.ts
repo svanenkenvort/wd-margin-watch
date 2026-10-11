@@ -20,10 +20,12 @@ export interface Summary {
   grossBase: number; // contract value of those jobs
   grossPct: number | null;
   estPct: number | null;
+  estAfterCommissionPct: number | null;
   commissionPaid: number;
   commissionOwed: number;
+  commission: number; // commission due (or paid, if more) on the jobs in gross
   afterCommission: number;
-  afterCommissionPct: number | null;
+  afterCommissionPct: number | null; // the margin shown everywhere
   collected: number;
   balance: number;
   averageJob: number;
@@ -33,13 +35,14 @@ export interface Summary {
 export function summarize(rows: Row[]): Summary {
   let revenue = 0, financeCharges = 0, materials = 0, labor = 0, gross = 0, grossBase = 0;
   let commissionPaid = 0, commissionOwed = 0, after = 0, afterBase = 0, collected = 0, balance = 0;
-  let estGross = 0, withoutActuals = 0;
+  let estGross = 0, estAfter = 0, commission = 0, withoutActuals = 0;
   for (const { job, c } of rows) {
     revenue += job.contractValue;
     financeCharges += c.financeCharges;
     materials += c.materialsActual;
     labor += job.laborActual ?? 0;
     estGross += c.estGross;
+    estAfter += c.estAfterCommission;
     commissionPaid += job.commissionPaid;
     commissionOwed += Math.max(0, c.commissionOwed);
     collected += c.totalPayments;
@@ -47,6 +50,7 @@ export function summarize(rows: Row[]): Summary {
     if (c.grossActual !== null) {
       gross += c.grossActual;
       grossBase += job.contractValue;
+      commission += c.commissionCost;
       after += c.grossAfterCommission ?? 0;
       afterBase += job.contractValue;
     } else withoutActuals += 1;
@@ -61,8 +65,10 @@ export function summarize(rows: Row[]): Summary {
     grossBase,
     grossPct: grossBase ? gross / grossBase : null,
     estPct: revenue ? estGross / revenue : null,
+    estAfterCommissionPct: revenue ? estAfter / revenue : null,
     commissionPaid,
     commissionOwed,
+    commission,
     afterCommission: after,
     afterCommissionPct: afterBase ? after / afterBase : null,
     collected,
@@ -103,12 +109,13 @@ export interface MonthPoint {
   bookedCount: number;
   completed: number;
   completedCount: number;
-  grossPct: number | null;
+  /** Margin after commission on jobs completed that month */
+  marginPct: number | null;
 }
 
 export function monthly(rows: Row[], year: number): MonthPoint[] {
   const pts: MonthPoint[] = Array.from({ length: 12 }, (_, month) => ({
-    month, booked: 0, bookedCount: 0, completed: 0, completedCount: 0, grossPct: null,
+    month, booked: 0, bookedCount: 0, completed: 0, completedCount: 0, marginPct: null,
   }));
   const gp = Array.from({ length: 12 }, () => ({ g: 0, base: 0 }));
   for (const { job, c } of bookedIn(rows, year)) {
@@ -121,12 +128,12 @@ export function monthly(rows: Row[], year: number): MonthPoint[] {
     if (m === null) continue;
     pts[m].completed += job.contractValue;
     pts[m].completedCount += 1;
-    if (c.grossActual !== null) {
-      gp[m].g += c.grossActual;
+    if (c.grossAfterCommission !== null) {
+      gp[m].g += c.grossAfterCommission;
       gp[m].base += job.contractValue;
     }
   }
-  pts.forEach((p, i) => (p.grossPct = gp[i].base ? gp[i].g / gp[i].base : null));
+  pts.forEach((p, i) => (p.marginPct = gp[i].base ? gp[i].g / gp[i].base : null));
   return pts;
 }
 
@@ -218,7 +225,7 @@ export function attention(rows: Row[], settings: Settings, year: number): Attent
 
 export function lowestMargins(rows: Row[], year: number, n = 5) {
   return completedIn(rows, year)
-    .filter((r) => r.c.actualPct !== null && r.job.contractValue >= 1500)
-    .sort((a, b) => (a.c.actualPct! - b.c.actualPct!))
+    .filter((r) => r.c.afterCommissionPct !== null && r.job.contractValue >= 1500)
+    .sort((a, b) => (a.c.afterCommissionPct! - b.c.afterCommissionPct!))
     .slice(0, n);
 }

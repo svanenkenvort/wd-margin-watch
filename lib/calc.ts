@@ -8,6 +8,9 @@ export interface Computed {
   depositLessInventory: number;
   estGross: number;
   estPct: number;
+  /** Estimated gross profit less the commission due: the estimated margin shown everywhere */
+  estAfterCommission: number;
+  estAfterCommissionPct: number;
   materialsActual: number;
   /** null until both materials and labor actuals exist (the sheet shows "n/a") */
   grossActual: number | null;
@@ -15,6 +18,9 @@ export interface Computed {
   commissionRate: number;
   commissionDue: number;
   commissionOwed: number;
+  /** Commission the job carries: what is due, or what was paid if that is more */
+  commissionCost: number;
+  /** Actual gross profit less commissionCost; afterCommissionPct is the margin shown everywhere */
   grossAfterCommission: number | null;
   afterCommissionPct: number | null;
   /** What still has to be typed on this job, in the order to enter it */
@@ -59,7 +65,11 @@ export function compute(job: Job, settings: Settings): Computed {
   const commissionRate = job.commissionRate ?? repRate(settings, job.rep);
   const commissionDue = g * commissionRate;
   const commissionOwed = commissionDue - (job.commissionPaid || 0);
-  const grossAfterCommission = grossActual !== null ? grossActual - (job.commissionPaid || 0) : null;
+  // The spreadsheet took off only commission already paid; counting what is due shows the margin before the rep is paid.
+  const commissionCost = Math.max(commissionDue, job.commissionPaid || 0);
+  const estAfterCommission = estGross - commissionCost;
+  const estAfterCommissionPct = g ? estAfterCommission / g : 0;
+  const grossAfterCommission = grossActual !== null ? grossActual - commissionCost : null;
   const afterCommissionPct =
     grossAfterCommission !== null && g ? grossAfterCommission / g : null;
 
@@ -83,12 +93,15 @@ export function compute(job: Job, settings: Settings): Computed {
     depositLessInventory,
     estGross,
     estPct,
+    estAfterCommission,
+    estAfterCommissionPct,
     materialsActual,
     grossActual,
     actualPct,
     commissionRate,
     commissionDue,
     commissionOwed,
+    commissionCost,
     grossAfterCommission,
     afterCommissionPct,
     missing,

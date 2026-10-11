@@ -16,23 +16,24 @@ export function DashboardView({ rows, settings, year }: { rows: Row[]; settings:
   const products = groupBy(done, (r) => productGroup(r.job.product));
   const todo = attention(rows, settings, year);
   const lows = lowestMargins(rows, year, 4);
-  const gap = s.estPct !== null && s.grossPct !== null ? s.grossPct - s.estPct : null;
-  const delta = s.grossPct !== null ? s.grossPct - target : null;
+  const margin = s.afterCommissionPct;
+  const gap = s.estAfterCommissionPct !== null && margin !== null ? margin - s.estAfterCommissionPct : null;
+  const delta = margin !== null ? margin - target : null;
 
   return (
     <div className="frame dashboard">
       <section className="pane pane-hero" aria-labelledby="hero-title">
-        <h2 id="hero-title" className="pane-title">Gross profit on {year} completed jobs</h2>
+        <h2 id="hero-title" className="pane-title">Margin after commission on {year} completed jobs</h2>
         <div className="hero-body">
-          <MarginWindow value={s.grossPct} target={target} />
+          <MarginWindow value={margin} target={target} />
           <div className="hero-read">
-            <p className="hero-number">{pct(s.grossPct)}</p>
+            <p className="hero-number">{pct(margin)}</p>
             <p className={`hero-delta ${delta !== null && delta < 0 ? "low" : "good"}`}>
               {delta === null ? "No finished jobs yet" : delta >= 0 ? `${(delta * 100).toFixed(1)} points above target` : `${(Math.abs(delta) * 100).toFixed(1)} points below target`}
             </p>
-            {gap !== null && s.estPct !== null && (
+            {gap !== null && s.estAfterCommissionPct !== null && (
               <p className="hero-note">
-                Jobs were estimated at {pct(s.estPct)} when sold. {gap < 0 ? `${(Math.abs(gap) * 100).toFixed(1)} points were lost` : `${(gap * 100).toFixed(1)} points were gained`} by the time they finished.
+                Jobs were estimated at {pct(s.estAfterCommissionPct)} when sold. {gap < 0 ? `${(Math.abs(gap) * 100).toFixed(1)} points were lost` : `${(gap * 100).toFixed(1)} points were gained`} by the time they finished.
               </p>
             )}
           </div>
@@ -49,12 +50,12 @@ export function DashboardView({ rows, settings, year }: { rows: Row[]; settings:
           <div className="ledger-row"><dt>Materials</dt><dd className="neg">{money(-s.materials)}</dd></div>
           <div className="ledger-row"><dt>Labor</dt><dd className="neg">{money(-s.labor)}</dd></div>
           <div className="ledger-row total"><dt>Gross profit</dt><dd>{money(s.gross)}</dd></div>
-          <div className="ledger-row"><dt>Commissions paid</dt><dd className="neg">{money(-s.commissionPaid)}</dd></div>
+          <div className="ledger-row"><dt>Commissions</dt><dd className="neg">{money(-s.commission)}</dd></div>
           <div className="ledger-row total"><dt>After commissions</dt><dd>{money(s.afterCommission)} <span className="ledger-pct">{pct(s.afterCommissionPct)}</span></dd></div>
           {s.commissionOwed > 1 && <div className="ledger-row warn"><dt>Commission still owed</dt><dd>{money(s.commissionOwed)}</dd></div>}
           {s.balance > 1 && <div className="ledger-row warn"><dt>Customer balances unpaid</dt><dd>{money(s.balance)}</dd></div>}
         </dl>
-        {s.withoutActuals > 0 && <p className="pane-note">{s.withoutActuals} job{s.withoutActuals === 1 ? "" : "s"} without labor paid are left out of gross profit.</p>}
+        {s.withoutActuals > 0 && <p className="pane-note">{s.withoutActuals} job{s.withoutActuals === 1 ? "" : "s"} without labor paid are left out of profit and margin.</p>}
       </section>
 
       <section className="pane pane-month" aria-labelledby="month-title">
@@ -67,7 +68,7 @@ export function DashboardView({ rows, settings, year }: { rows: Row[]; settings:
           </p>
         </div>
         <div className="chart-scroll"><MonthlyChart points={months} target={target} year={year} /></div>
-        <p className="pane-note">{booked.count} jobs sold in {year} for {money(booked.revenue)}. Percentages are gross profit on jobs completed that month.</p>
+        <p className="pane-note">{booked.count} jobs sold in {year} for {money(booked.revenue)}. Percentages are margin after commission on jobs completed that month.</p>
       </section>
 
       <section className="pane pane-pipeline" aria-labelledby="pipe-title">
@@ -99,7 +100,7 @@ export function DashboardView({ rows, settings, year }: { rows: Row[]; settings:
                 <td>{repLabel(r.key)}</td>
                 <td className="num">{r.count}</td>
                 <td className="num">{moneyShort(r.revenue)}</td>
-                <td className={`num${r.grossPct !== null && r.grossPct < target ? " low" : ""}`}>{pct(r.grossPct)}</td>
+                <td className={`num${r.afterCommissionPct !== null && r.afterCommissionPct < target ? " low" : ""}`}>{pct(r.afterCommissionPct)}</td>
                 <td className="num">{moneyShort(r.commissionPaid)}</td>
               </tr>
             ))}
@@ -110,7 +111,7 @@ export function DashboardView({ rows, settings, year }: { rows: Row[]; settings:
       <section className="pane pane-products" aria-labelledby="prod-title">
         <h2 id="prod-title" className="pane-title">By product</h2>
         <HBars
-          items={products.map((p) => ({ key: p.key, value: p.revenue, label: `${p.key} (${p.count})`, right: `${moneyShort(p.revenue)} at ${pct(p.grossPct, 0)}`, ok: p.grossPct === null ? null : p.grossPct >= target }))}
+          items={products.map((p) => ({ key: p.key, value: p.revenue, label: `${p.key} (${p.count})`, right: `${moneyShort(p.revenue)} at ${pct(p.afterCommissionPct, 0)}`, ok: p.afterCommissionPct === null ? null : p.afterCommissionPct >= target }))}
         />
       </section>
 
@@ -140,7 +141,7 @@ export function DashboardView({ rows, settings, year }: { rows: Row[]; settings:
                   <a href={`/completed?job=${job.id}&year=${year}`}>
                     <span className="attn-dot margin" />
                     <span><strong>{job.name}</strong><small>{money(job.contractValue)} sold {dateLabel(job.soldDate, false)}</small></span>
-                    <em>{pct(c.actualPct)}</em>
+                    <em>{pct(c.afterCommissionPct)}</em>
                   </a>
                 </li>
               ))}

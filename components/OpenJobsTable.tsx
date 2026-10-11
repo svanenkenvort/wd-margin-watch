@@ -40,7 +40,7 @@ export function OpenJobsTable({ rows, settings, initialJobId, review = 0 }: { ro
       if (sort === "oldest") return (a.job.soldDate ?? "").localeCompare(b.job.soldDate ?? "");
       if (sort === "newest") return (b.job.soldDate ?? "").localeCompare(a.job.soldDate ?? "");
       if (sort === "largest") return b.job.contractValue - a.job.contractValue;
-      return a.c.estPct - b.c.estPct;
+      return a.c.estAfterCommissionPct - b.c.estAfterCommissionPct;
     });
     return out;
   }, [rows, q, stage, rep, needsOnly, sort]);
@@ -85,7 +85,7 @@ export function OpenJobsTable({ rows, settings, initialJobId, review = 0 }: { ro
               <th colSpan={3} className="sticky-col">Job</th>
               <th colSpan={3}>Money in</th>
               <th colSpan={5} className="entry-head">You enter</th>
-              <th colSpan={2}>Margin</th>
+              <th colSpan={2}>Margin after commission</th>
               <th colSpan={3} className="entry-head">Commission</th>
               <th />
             </tr>
@@ -152,8 +152,8 @@ export function OpenJobsTable({ rows, settings, initialJobId, review = 0 }: { ro
                   <td className="num entry-col"><NumField kind="percent" label={`Finance percent for ${job.name}`} value={job.financePct} allowEmpty={false} onCommit={(v) => api.patch(job.id, { financePct: v ?? 0 })} /></td>
                   <td className="num entry-col"><NumField label={`Materials paid for ${job.name}`} value={job.materialsPaid} onCommit={(v) => api.patch(job.id, { materialsPaid: v })} /></td>
                   <td className="num entry-col"><NumField label={`Labor paid for ${job.name}`} value={job.laborActual} onCommit={(v) => api.patch(job.id, { laborActual: v })} /></td>
-                  <td className={`num pcell ${tone(c.estPct, target)}`}>{pct(c.estPct)}</td>
-                  <td className={`num nowrap pcell ${tone(c.actualPct, target)}`}>{c.actualPct === null ? <span className="muted">needs labor</span> : pct(c.actualPct)}</td>
+                  <td className={`num pcell ${tone(c.estAfterCommissionPct, target)}`}>{pct(c.estAfterCommissionPct)}</td>
+                  <td className={`num nowrap pcell ${tone(c.afterCommissionPct, target)}`}>{c.afterCommissionPct === null ? <span className="muted">needs labor</span> : pct(c.afterCommissionPct)}</td>
                   <td className="nowrap">{repLabel(job.rep) || "–"}</td>
                   <td className="num entry-col"><NumField kind="percent" label={`Commission rate for ${job.name}`} value={job.commissionRate ?? defaultRate ?? null} onCommit={(v) => api.patch(job.id, { commissionRate: v })} /></td>
                   <td className="num entry-col"><NumField label={`Commission paid for ${job.name}`} value={job.commissionPaid} allowEmpty={false} onCommit={(v) => api.patch(job.id, { commissionPaid: v ?? 0 })} /></td>
@@ -164,7 +164,7 @@ export function OpenJobsTable({ rows, settings, initialJobId, review = 0 }: { ro
           </tbody>
         </table>
       </div>
-      <p className="table-foot">{list.length} of {rows.length} open jobs. Estimated margin turns amber within 5 points of the {pct(target, 0)} target and red below that.</p>
+      <p className="table-foot">{list.length} of {rows.length} open jobs. Margins are after commission due. Estimated margin turns amber within 5 points of the {pct(target, 0)} target and red below that.</p>
 
       {editing && (editing === "new" || editJob) && <JobDrawer job={editing === "new" ? null : editJob} settings={settings} api={api} onClose={() => setEditing(null)} />}
       {completing && <CompleteModal job={completing} api={api} onClose={() => setCompleting(null)} balance={rows.find((r) => r.job.id === completing.id)?.c.balance ?? 0} />}

@@ -130,7 +130,8 @@ read_tab("2025 Completed Jobs", "completed", 2025)
 store = {
     "version": 1,
     "settings": {
-        "targetMargin": 0.5,
+        "targetMargin": 0.4,
+        "marginBasis": "afterCommission",
         "materialsAllowance": 0.03,
         "reps": [
             {"name": "SCHMITZ", "commissionRate": 0.10},

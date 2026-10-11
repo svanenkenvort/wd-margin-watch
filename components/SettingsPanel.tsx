@@ -133,10 +133,10 @@ export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp
       <section className="pane block">
         <h2 className="pane-title">Targets</h2>
         <div className="field-row">
-          <label className="field"><span>Target gross profit</span><NumField kind="percent" label="Target gross profit" value={target} allowEmpty={false} onCommit={(v) => { setTarget(v ?? 0.5); saveSettings({ targetMargin: v ?? 0.5 }); }} /></label>
+          <label className="field"><span>Target margin after commission</span><NumField kind="percent" label="Target margin after commission" value={target} allowEmpty={false} onCommit={(v) => { setTarget(v ?? 0.4); saveSettings({ targetMargin: v ?? 0.4 }); }} /></label>
           <label className="field"><span>Materials allowance added to estimates</span><NumField kind="percent" label="Materials allowance" value={allowance} allowEmpty={false} onCommit={(v) => { setAllowance(v ?? 0.03); saveSettings({ materialsAllowance: v ?? 0.03 }); }} /></label>
         </div>
-        <p className="hint">Actual materials are the materials estimate plus {pct(allowance, 1)} of the contract, the same as your spreadsheet. Type an actual amount on a job to override it.</p>
+        <p className="hint">Actual materials are the materials estimate plus {pct(allowance, 1)} of the contract, the same as your spreadsheet. Type an actual amount on a job to override it. Every margin in the app is after commission: the commission due on the job, or what was paid if that is more.</p>
       </section>
 
       <section className="pane block">

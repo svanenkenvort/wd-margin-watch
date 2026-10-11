@@ -24,7 +24,7 @@ export function CompletedTable({ rows, settings, year, initialJobId }: { rows: R
 
   const counts = useMemo(
     () => ({
-      low: rows.filter((r) => r.c.actualPct !== null && r.c.actualPct < target).length,
+      low: rows.filter((r) => r.c.afterCommissionPct !== null && r.c.afterCommissionPct < target).length,
       balance: rows.filter((r) => r.c.balance > 1).length,
       labor: rows.filter((r) => r.job.laborActual === null).length,
       commission: rows.filter((r) => r.c.commissionOwed > 1).length,
@@ -36,7 +36,7 @@ export function CompletedTable({ rows, settings, year, initialJobId }: { rows: R
     const t = q.trim().toLowerCase();
     const out = rows.filter(({ job, c }) => {
       if (t && !`${job.name} ${job.jobNumber} ${job.product} ${job.rep}`.toLowerCase().includes(t)) return false;
-      if (filter === "low") return c.actualPct !== null && c.actualPct < target;
+      if (filter === "low") return c.afterCommissionPct !== null && c.afterCommissionPct < target;
       if (filter === "balance") return c.balance > 1;
       if (filter === "labor") return job.laborActual === null;
       if (filter === "commission") return c.commissionOwed > 1;
@@ -46,7 +46,7 @@ export function CompletedTable({ rows, settings, year, initialJobId }: { rows: R
       const v =
         sort === "date" ? (a.job.completeDate ?? "").localeCompare(b.job.completeDate ?? "")
         : sort === "contract" ? a.job.contractValue - b.job.contractValue
-        : (a.c.actualPct ?? 9) - (b.c.actualPct ?? 9);
+        : (a.c.afterCommissionPct ?? 9) - (b.c.afterCommissionPct ?? 9);
       return v * dir;
     });
   }, [rows, q, filter, sort, dir, target]);
@@ -94,15 +94,15 @@ export function CompletedTable({ rows, settings, year, initialJobId }: { rows: R
               <th className="num entry-col">Labor paid</th>
               <th className="num">Finance</th>
               <th className="num">Gross profit</th>
-              {head("margin", "Margin", "num")}
               <th>Rep</th>
               <th className="num">Commission paid</th>
               <th className="num">Owed</th>
               <th className="num">After commission</th>
+              {head("margin", "Margin", "num")}
             </tr>
           </thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={13} className="empty-row">{rows.length === 0 ? `No jobs were completed in ${year}.` : "No jobs match that filter."}</td></tr>}
+            {list.length === 0 && <tr><td colSpan={14} className="empty-row">{rows.length === 0 ? `No jobs were completed in ${year}.` : "No jobs match that filter."}</td></tr>}
             {list.map(({ job, c }) => (
               <tr key={job.id}>
                 <td className="sticky-col">
@@ -116,11 +116,11 @@ export function CompletedTable({ rows, settings, year, initialJobId }: { rows: R
                 <td className="num entry-col"><NumField label={`Labor paid for ${job.name}`} value={job.laborActual} needed={job.laborActual === null} onCommit={(v) => api.patch(job.id, { laborActual: v })} /></td>
                 <td className="num muted">{c.financeCharges > 0 ? money(c.financeCharges) : "–"}</td>
                 <td className="num">{c.grossActual === null ? <span className="muted">needs labor</span> : money(c.grossActual)}</td>
-                <td className={`num pcell ${tone(c.actualPct, target)}`}>{pct(c.actualPct)}</td>
                 <td className="nowrap">{repLabel(job.rep) || "–"}</td>
                 <td className="num">{job.commissionPaid ? money(job.commissionPaid) : "–"}</td>
                 <td className={`num${c.commissionOwed > 1 ? " low" : " muted"}`}>{c.commissionOwed > 1 ? money(c.commissionOwed) : "–"}</td>
-                <td className={`num pcell ${tone(c.afterCommissionPct, target - 0.1)}`}>{pct(c.afterCommissionPct)}</td>
+                <td className="num">{c.grossAfterCommission === null ? <span className="muted">needs labor</span> : money(c.grossAfterCommission)}</td>
+                <td className={`num pcell ${tone(c.afterCommissionPct, target)}`}>{pct(c.afterCommissionPct)}</td>
               </tr>
             ))}
           </tbody>

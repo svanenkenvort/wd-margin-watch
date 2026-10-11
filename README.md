@@ -82,6 +82,11 @@ row, and each row says what else is missing. Opening a job shows a "Still to ent
 
 ## Spreadsheet differences worth knowing
 
+- Every margin in the app (dashboard, tables, reports, the target) is **gross profit after commission %**. The commission
+  taken off is what is due on the job (contract × commission rate), or what was paid if that is more. The sheet took off
+  only commission already paid, so a job looked better until the rep was paid. The target defaults to 40%; set it under
+  Settings → Targets. Gross profit before commission is still shown in dollars, and as a % on the yearly report and in each job.
+
 - Open jobs total: the sheet's contract total only summed rows 6 to 43 (49 jobs run to row 54), so it showed $436,089. The real total is $561,885.
 - "Actual materials" is the materials estimate plus 3% of the contract (your formula). 14 jobs had a typed-over amount; those are kept as overrides.
 - Production stage was read from the color of each job name (your legend on the Summary tab).

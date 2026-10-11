@@ -2,7 +2,7 @@ import { moneyShort, monthName, pct } from "@/lib/format";
 import type { MonthPoint } from "@/lib/stats";
 
 /**
- * The window: a sash whose glass fills to the year's gross profit.
+ * The window: a sash whose glass fills to the year's margin after commission.
  * The meeting rail sits exactly on the target, so "above the rail" means on target.
  */
 export function MarginWindow({ value, target, scaleMax = 0.8 }: { value: number | null; target: number; scaleMax?: number }) {
@@ -14,7 +14,7 @@ export function MarginWindow({ value, target, scaleMax = 0.8 }: { value: number 
   const meets = value !== null && value >= target;
   const fill = meets ? "var(--teal)" : "var(--amber)";
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="window-svg" role="img" aria-label={value === null ? "No gross profit yet" : `Gross profit ${pct(value)} against a ${pct(target, 0)} target`}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="window-svg" role="img" aria-label={value === null ? "No margin yet" : `Margin after commission ${pct(value)} against a ${pct(target, 0)} target`}>
       <defs>
         <clipPath id="glass-clip">
           <rect x={gx} y={gy} width={gw} height={gh} rx="3" />
@@ -62,11 +62,11 @@ export function MonthlyChart({ points, target, year }: { points: MonthPoint[]; t
         const cx = left + colW * i + colW / 2;
         const bw = Math.min(colW * 0.74, 40);
         const iw = bw * 0.58;
-        const low = p.grossPct !== null && p.grossPct < target;
+        const low = p.marginPct !== null && p.marginPct < target;
         const future = i > nowMonth;
         return (
           <g key={p.month} opacity={future && p.booked + p.completed === 0 ? 0.5 : 1}>
-            <title>{`${monthName(i)} ${year}: ${p.bookedCount} sold for ${moneyShort(p.booked)}; ${p.completedCount} completed for ${moneyShort(p.completed)}${p.grossPct !== null ? `, ${pct(p.grossPct)} gross profit` : ""}`}</title>
+            <title>{`${monthName(i)} ${year}: ${p.bookedCount} sold for ${moneyShort(p.booked)}; ${p.completedCount} completed for ${moneyShort(p.completed)}${p.marginPct !== null ? `, ${pct(p.marginPct)} margin after commission` : ""}`}</title>
             {p.booked > 0 && (
               <rect x={cx - bw / 2} y={y(p.booked)} width={bw} height={y(0) - y(p.booked)} rx="3" fill="none" stroke="var(--ink-3)" strokeWidth="1.4" strokeDasharray="3 3" />
             )}
@@ -75,7 +75,7 @@ export function MonthlyChart({ points, target, year }: { points: MonthPoint[]; t
             )}
             <text x={cx} y={H - 30} textAnchor="middle" className="axis axis-month">{monthName(i)}</text>
             <text x={cx} y={H - 12} textAnchor="middle" className={`axis axis-pct${low ? " low" : ""}`}>
-              {p.grossPct === null ? "" : `${(p.grossPct * 100).toFixed(0)}%`}
+              {p.marginPct === null ? "" : `${(p.marginPct * 100).toFixed(0)}%`}
             </text>
           </g>
         );
