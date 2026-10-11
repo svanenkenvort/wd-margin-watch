@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { dateLabel, money, pct } from "@/lib/format";
+import { linkedRep } from "@/lib/bp-mapping";
+import { dateLabel, money, pct, repLabel } from "@/lib/format";
 import type { BpCandidate, BpReview, RepSetting, Settings } from "@/lib/types";
 import { NumField, useToast } from "./inputs";
 import { useSync, type SyncResult } from "./useSync";
@@ -84,7 +85,16 @@ function ReviewList({ review, onDone }: { review: BpReview; onDone: (msg: string
   );
 }
 
-export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp: { base: string; hasKey: boolean; subdomain: string }; review: BpReview | null }) {
+export interface BpPerson {
+  /** As Builder Prime writes them, e.g. "Mike Schmitz". */
+  name: string;
+  /** Linked jobs and projects waiting for review that they sold. */
+  jobs: number;
+  /** The rep the last sync matched them to. */
+  rep: string;
+}
+
+export function SettingsPanel({ settings, bp, review, bpPeople }: { settings: Settings; bp: { base: string; hasKey: boolean; subdomain: string }; review: BpReview | null; bpPeople: BpPerson[] }) {
   const router = useRouter();
   const { toast, show } = useToast();
   const [reps, setReps] = useState<RepSetting[]>(settings.reps);
@@ -104,6 +114,9 @@ export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp
       router.refresh();
     } else show((await res.json().catch(() => ({}))).error ?? "That didn't save.", "error");
   };
+
+  const unlinked = bpPeople.filter((p) => !linkedRep(p.name, reps));
+  const editRep = (i: number, change: Partial<RepSetting>) => setReps(reps.map((x, j) => (j === i ? { ...x, ...change } : x)));
 
   const syncer = useSync((data, err) => {
     if (err) setError(err);
@@ -142,19 +155,46 @@ export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp
       <section className="pane block">
         <h2 className="pane-title">Sales reps and commission</h2>
         <table className="mini reps-edit">
-          <thead><tr><th>Rep</th><th className="num">Default commission</th><th /></tr></thead>
+          <thead><tr><th>Rep</th><th>Name in Builder Prime</th><th className="num">Default commission</th><th /></tr></thead>
           <tbody>
             {reps.map((r, i) => (
               <tr key={i}>
-                <td><input aria-label="Rep name" value={r.name} onChange={(e) => setReps(reps.map((x, j) => (j === i ? { ...x, name: e.target.value.toUpperCase() } : x)))} onBlur={() => saveSettings({ reps })} /></td>
-                <td className="num"><NumField kind="percent" label={`Default commission for ${r.name}`} value={r.commissionRate} allowEmpty={false} onCommit={(v) => { const next = reps.map((x, j) => (j === i ? { ...x, commissionRate: v ?? 0 } : x)); setReps(next); saveSettings({ reps: next }); }} /></td>
+                <td><input aria-label="Rep name" value={r.name} onChange={(e) => editRep(i, { name: e.target.value.toUpperCase() })} onBlur={() => saveSettings({ reps })} /></td>
+                <td><input aria-label={`Builder Prime name for ${r.name}`} list="bp-people" placeholder="Not linked" value={r.builderPrimeName ?? ""} onChange={(e) => editRep(i, { builderPrimeName: e.target.value })} onBlur={() => saveSettings({ reps })} /></td>
+                <td className="num"><NumField kind="percent" label={`Default commission for ${r.name}`} value={r.commissionRate} needed={!!r.needsRate} allowEmpty={false} onCommit={(v) => { const next = reps.map((x, j) => (j === i ? { ...x, commissionRate: v ?? 0, needsRate: undefined } : x)); setReps(next); saveSettings({ reps: next }); }} /></td>
                 <td><button className="btn btn-small btn-quiet" onClick={() => { const next = reps.filter((_, j) => j !== i); setReps(next); saveSettings({ reps: next }); }}>Remove</button></td>
               </tr>
             ))}
           </tbody>
         </table>
+        <datalist id="bp-people">{bpPeople.map((p) => <option key={p.name} value={p.name} />)}</datalist>
         <button className="btn btn-small" onClick={() => setReps([...reps, { name: "", commissionRate: 0.1 }])}>Add rep</button>
-        <p className="hint">New jobs use the rep's default rate. You only type a rate on a job when it differs.</p>
+        <p className="hint">Every rep on a job or in Builder Prime is listed here. New jobs use the rep's default rate; you only type a rate on a job when it differs.</p>
+        {reps.some((r) => r.needsRate) && <p className="hint warn">{reps.filter((r) => r.needsRate).map((r) => repLabel(r.name)).join(", ")} {reps.filter((r) => r.needsRate).length === 1 ? "was" : "were"} found on jobs or in Builder Prime and {reps.filter((r) => r.needsRate).length === 1 ? "has" : "have"} no commission rate yet (0% until you set one).</p>}
+        <p className="hint">Name in Builder Prime is the project&apos;s sales person there. Each sync gives open jobs the rep linked to that name, and so that rep&apos;s rate.</p>
+        {unlinked.length > 0 && (
+          <div className="review">
+            <h3>In Builder Prime, not linked to a rep ({unlinked.length})</h3>
+            <ul>
+              {unlinked.map((p) => {
+                const existing = reps.findIndex((r) => r.name === p.rep && !r.builderPrimeName);
+                return (
+                  <li key={p.name}>
+                    <div><strong>{p.name}</strong> <span className="muted">· {p.jobs} job{p.jobs === 1 ? "" : "s"}{p.rep ? ` · matched to ${repLabel(p.rep)} by name` : ""}</span></div>
+                    <div className="review-actions">
+                      {existing >= 0 ? (
+                        <button className="btn btn-small btn-primary" onClick={() => { const next = reps.map((r, j) => (j === existing ? { ...r, builderPrimeName: p.name } : r)); setReps(next); saveSettings({ reps: next }); }}>Link to {repLabel(p.rep)}</button>
+                      ) : (
+                        <button className="btn btn-small" onClick={() => { const next = [...reps, { name: p.rep && !reps.some((r) => r.name === p.rep) ? p.rep : p.name.toUpperCase(), commissionRate: 0.1, builderPrimeName: p.name }]; setReps(next); saveSettings({ reps: next }); }}>Add as a rep</button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        {bpPeople.length === 0 && <p className="hint">Run a Builder Prime sync to see the sales people there.</p>}
       </section>
 
       <section className="pane block bp">

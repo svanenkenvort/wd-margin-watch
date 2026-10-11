@@ -70,6 +70,7 @@ const JOB_COLS: Col[] = [
   { header: "Notes", width: 30, kind: "text", value: ({ job }) => job.notes },
   { header: "Came from", width: 12, kind: "text", value: ({ job }) => ({ sheet: "Spreadsheet", builderprime: "Builder Prime", manual: "Added by hand" })[job.source] },
   { header: "Builder Prime job #", width: 10, kind: "text", value: ({ job }) => job.builderPrimeJobNumber ?? "" },
+  { header: "Builder Prime sales rep", width: 18, kind: "text", value: ({ job }) => job.bp?.salesPerson ?? "" },
   { header: "BP status", width: 12, kind: "text", value: ({ job }) => job.bp?.status ?? "" },
   { header: "BP contract", width: 12, kind: "money", value: ({ job }) => job.bp?.contracted ?? null },
   { header: "BP invoiced", width: 12, kind: "money", value: ({ job }) => job.bp?.invoiced ?? null },
@@ -113,8 +114,8 @@ export async function workbook(data: StoreData): Promise<Buffer> {
   sheet(
     wb,
     "Sales reps",
-    [{ header: "Rep", width: 18, kind: "text" }, { header: "Default commission", width: 14, kind: "pct" }],
-    data.settings.reps.map((r) => [r.name, r.commissionRate]),
+    [{ header: "Rep", width: 18, kind: "text" }, { header: "Name in Builder Prime", width: 22, kind: "text" }, { header: "Default commission", width: 14, kind: "pct" }],
+    data.settings.reps.map((r) => [r.name, r.builderPrimeName ?? "", r.commissionRate]),
   );
   sheet(
     wb,

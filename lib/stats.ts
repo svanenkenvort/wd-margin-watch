@@ -210,6 +210,8 @@ export function attention(rows: Row[], settings: Settings, year: number): Attent
       const tab = job.state === "open" ? "open" : "completed";
       if (k.kind === "payments")
         out.push({ id: `p-${job.id}`, jobId: job.id, kind: "money", tab, title: `${job.name}: payments differ from Builder Prime`, detail: `Builder Prime shows ${usd(k.builderPrime)} paid, ${usd(k.entered)} entered here` });
+      else if (k.kind === "rep")
+        out.push({ id: `r-${job.id}`, jobId: job.id, kind: "data", tab, title: `${job.name}: sales rep differs from Builder Prime`, detail: `Builder Prime has ${k.salesPerson} (${k.rep}), the job has ${job.rep || "no rep"}` });
       else
         out.push({ id: `k-${job.id}`, jobId: job.id, kind: "data", tab, title: `${job.name} is complete in Builder Prime`, detail: k.on ? `Completed ${k.on}. Click Complete when the install is done.` : "Click Complete when the install is done." });
     }

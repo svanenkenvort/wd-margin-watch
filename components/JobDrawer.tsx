@@ -75,7 +75,7 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
       </header>
 
       <div className="drawer-body">
-        {!creating && <TodoPanel missing={c.missing} checks={c.checks} onUseBpPayments={addBpPayments} />}
+        {!creating && <TodoPanel missing={c.missing} checks={c.checks} onUseBpPayments={addBpPayments} onUseBpRep={(r) => set("rep", r)} />}
         {d.bp && <BpPanel bp={d.bp} jobNumber={d.builderPrimeJobNumber} />}
         <fieldset>
           <legend>Job</legend>
@@ -86,7 +86,7 @@ export function JobDrawer({ job, settings, api, onClose }: { job: Job | null; se
           </div>
           <div className="field-row">
             <label className="field">
-              <span>Sales rep</span>
+              <span>Sales rep{d.bp?.salesPerson ? <small className="muted"> · Builder Prime: {d.bp.salesPerson}</small> : null}</span>
               <input list="reps" value={d.rep} onChange={(e) => set("rep", e.target.value.toUpperCase())} />
               <datalist id="reps">{settings.reps.map((r) => <option key={r.name} value={r.name} />)}</datalist>
             </label>

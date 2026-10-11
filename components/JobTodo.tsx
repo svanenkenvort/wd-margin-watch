@@ -1,7 +1,7 @@
 "use client";
 
 import type { BpCheck, MissingField } from "@/lib/calc";
-import { dateLabel, money } from "@/lib/format";
+import { dateLabel, money, repLabel } from "@/lib/format";
 import type { BpSnapshot } from "@/lib/types";
 
 /** One line under the customer in the table: what is still to enter. Opens the job. */
@@ -17,10 +17,13 @@ export function MissingLine({ missing, onOpen }: { missing: MissingField[]; onOp
 const checkText = (k: BpCheck) =>
   k.kind === "payments"
     ? `Builder Prime shows ${money(k.builderPrime, true)} paid, ${money(k.entered, true)} entered here`
-    : `Complete in Builder Prime${k.on ? ` since ${dateLabel(k.on)}` : ""}`;
+    : k.kind === "rep"
+      ? `Builder Prime has ${k.salesPerson} as the sales rep (${repLabel(k.rep)} here)`
+      : `Complete in Builder Prime${k.on ? ` since ${dateLabel(k.on)}` : ""}`;
 
 /** Short form for the table; the job itself shows the full sentence. */
-const checkShort = (k: BpCheck) => (k.kind === "payments" ? `Paid differs from Builder Prime (${money(k.builderPrime)})` : "Complete in Builder Prime");
+const checkShort = (k: BpCheck) =>
+  k.kind === "payments" ? `Paid differs from Builder Prime (${money(k.builderPrime)})` : k.kind === "rep" ? `Builder Prime rep: ${k.salesPerson}` : "Complete in Builder Prime";
 
 export function BpFlags({ checks, onOpen }: { checks: BpCheck[]; onOpen: () => void }) {
   if (!checks.length) return null;
@@ -44,7 +47,7 @@ const focusField = (field: string) => {
  * The checklist at the top of a job: each missing entry jumps to its field, and each place the
  * job and Builder Prime disagree says what to do about it.
  */
-export function TodoPanel({ missing, checks, onUseBpPayments }: { missing: MissingField[]; checks: BpCheck[]; onUseBpPayments?: () => void }) {
+export function TodoPanel({ missing, checks, onUseBpPayments, onUseBpRep }: { missing: MissingField[]; checks: BpCheck[]; onUseBpPayments?: () => void; onUseBpRep?: (rep: string) => void }) {
   if (!missing.length && !checks.length) return <p className="todo-done">Everything this job needs is entered.</p>;
   return (
     <section className="todo" aria-label="Still to enter">
@@ -66,6 +69,8 @@ export function TodoPanel({ missing, checks, onUseBpPayments }: { missing: Missi
           )}
           {k.kind === "payments" && k.builderPrime < k.entered && <> Check the amounts entered below.</>}
           {k.kind === "complete" && <> Click Complete on the Open jobs list when the install is done.</>}
+          {k.kind === "rep" && onUseBpRep && <> <button className="btn btn-small" onClick={() => onUseBpRep(k.rep)}>Use {repLabel(k.rep)}</button></>}
+          {k.kind === "rep" && <> If {repLabel(k.rep)} isn&apos;t who {k.salesPerson} is, set their Builder Prime name under Settings &gt; Sales reps.</>}
         </p>
       ))}
     </section>
@@ -77,7 +82,7 @@ export function BpPanel({ bp, jobNumber }: { bp: BpSnapshot; jobNumber: string |
   return (
     <section className="bp-panel" aria-label="From Builder Prime">
       <h3>
-        From Builder Prime{jobNumber ? ` · job #${jobNumber}` : ""} <span className="muted">· {bp.status}{bp.projectName ? ` · ${bp.projectName}` : ""}</span>
+        From Builder Prime{jobNumber ? ` · job #${jobNumber}` : ""} <span className="muted">· {bp.status}{bp.projectName ? ` · ${bp.projectName}` : ""}{bp.salesPerson ? ` · sold by ${bp.salesPerson}` : ""}</span>
       </h3>
       <dl>
         <div><dt>Contract</dt><dd>{money(bp.contracted, true)}</dd></div>
