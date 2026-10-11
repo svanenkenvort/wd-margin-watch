@@ -1,7 +1,7 @@
-import { asDate, customerName, isComplete, isSold, productCode, repName, sameCustomer, startStage, type BpProject, type BpProjectDetail } from "./bp-mapping";
+import { asDate, customerName, foundReps, isComplete, isSold, productCode, repName, salesPersonName, sameCustomer, startStage, type BpProject, type BpProjectDetail } from "./bp-mapping";
 import { randomUUID } from "crypto";
 import { blankJob, mutate, readStore } from "./store";
-import type { BpCandidate, BpReview, BpSnapshot, Job, Settings, StoreData } from "./types";
+import type { BpCandidate, BpReview, BpSnapshot, Job, RepSetting, Settings, StoreData } from "./types";
 
 /**
  * Builder Prime Open API client. Only reads.
@@ -81,7 +81,8 @@ function needsDetail(p: BpProject, cached: CacheEntry | undefined, job: Job | un
   return !!job && owes(cached);
 }
 
-function candidate(p: BpProject, c: CacheEntry | undefined, known: string[], now: string): BpCandidate {
+function candidate(p: BpProject, c: CacheEntry | undefined, reps: RepSetting[], known: string[], now: string): BpCandidate {
+  const rep = repName(p, reps, known);
   const snapshot: BpSnapshot = {
     status: p.projectStatusDescription ?? "",
     projectName: (p.projectName ?? "").trim(),
@@ -90,6 +91,8 @@ function candidate(p: BpProject, c: CacheEntry | undefined, known: string[], now
     invoiced: c?.invoiced ?? null,
     paid: c?.paid ?? null,
     cost: num(p.materialCost),
+    salesPerson: salesPersonName(p),
+    rep,
     complete: isComplete(p),
     completedOn: isComplete(p) ? asDate(p.completionDateTime) : null,
     syncedAt: now,
@@ -98,7 +101,7 @@ function candidate(p: BpProject, c: CacheEntry | undefined, known: string[], now
     projectId: String(p.id),
     bpJobNumber: p.companySequenceNumber != null ? String(p.companySequenceNumber) : "",
     name: customerName(p),
-    rep: repName(p, known),
+    rep,
     product: productCode(p),
     stage: startStage(p, snapshot.paid ?? 0),
     snapshot,
@@ -127,11 +130,18 @@ function newJob(c: BpCandidate): Job {
  * Puts Builder Prime's figures on a linked job. Open jobs take Builder Prime's contract value and
  * fill an empty materials estimate or product; completed jobs keep their numbers. Payments you
  * entered are never changed (the job shows if they differ from Builder Prime).
+ * The sales rep: an empty rep is filled in and an open job takes Builder Prime's sales person (a rep
+ * in Settings by now, see foundReps); a completed job keeps its rep and shows the difference.
  */
-function refresh(job: Job, c: BpCandidate, changes: string[]): boolean {
+function refresh(job: Job, c: BpCandidate, reps: RepSetting[], changes: string[]): boolean {
   let changed = false;
   job.bp = c.snapshot;
   if (c.bpJobNumber && job.builderPrimeJobNumber !== c.bpJobNumber) job.builderPrimeJobNumber = c.bpJobNumber;
+  if (c.rep && job.rep !== c.rep && (!job.rep || (job.state === "open" && reps.some((r) => r.name === c.rep)))) {
+    changes.push(`${job.name}: sales rep ${job.rep || "(none)"} → ${c.rep} (${c.snapshot.salesPerson} in Builder Prime)`);
+    job.rep = c.rep;
+    changed = true;
+  }
   if (job.state === "open") {
     const s = c.snapshot;
     if (s.contracted && Math.abs(s.contracted - job.contractValue) >= 0.01) {
@@ -185,9 +195,12 @@ function place(d: StoreData, sold: BpProject[], cache: Cache, report: SyncReport
   // Newest first: with the sold-date check, a returning customer's newest project can only match
   // their newest job, which leaves the earlier job for the earlier project.
   const order = [...sold].sort((a, b) => (b.companySequenceNumber ?? 0) - (a.companySequenceNumber ?? 0));
-  const cands = new Map(order.map((p) => [String(p.id), candidate(p, cache[String(p.id)], known, now)]));
+  const cands = new Map(order.map((p) => [String(p.id), candidate(p, cache[String(p.id)], d.settings.reps, known, now)]));
   const isNewSale = (p: BpProject) => !!seen && !seen.has(String(p.id));
   const same = (j: Job, v: number | null) => v !== null && Math.abs(j.contractValue - v) < 0.01;
+  // Every rep on a job and every Builder Prime sales person is a rep in Settings (linked to their
+  // Builder Prime name), so each can be given a commission rate.
+  d.settings.reps = foundReps(d.settings.reps, d.jobs.map((j) => j.rep), [...cands.values()].map((c) => c.snapshot));
 
   // Pass 1: link every project that has exactly one job it could be, at the same contract value.
   for (const p of order) {
@@ -206,7 +219,7 @@ function place(d: StoreData, sold: BpProject[], cache: Cache, report: SyncReport
     const c = cands.get(id)!;
     const job = d.jobs.find((j) => j.builderPrimeId === id);
     if (job) {
-      if (refresh(job, c, report.changes)) report.updated++;
+      if (refresh(job, c, d.settings.reps, report.changes)) report.updated++;
       continue;
     }
     if (ignored.has(id)) continue;
@@ -443,7 +456,7 @@ export function applyReview(a: ReviewAction) {
     if (!job) throw new BpError("That job no longer exists.", 404);
     if (job.builderPrimeId) throw new BpError(`${job.name} is already linked to Builder Prime job #${job.builderPrimeJobNumber ?? "?"}.`, 409);
     job.builderPrimeId = c.projectId;
-    refresh(job, c, []);
+    refresh(job, c, d.settings.reps, []);
     drop(a.projectId);
     return { linked: 1 };
   });

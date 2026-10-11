@@ -68,6 +68,10 @@ export interface BpSnapshot {
   paid: number | null;
   /** Builder Prime's cost (the report's "Contract Cost"). */
   cost: number | null;
+  /** The project's sales person as Builder Prime has them ("Mike Schmitz"). Set from the next sync on. */
+  salesPerson?: string;
+  /** The app rep that sales person is (see repName), e.g. "SCHMITZ". */
+  rep?: string;
   /** Builder Prime has the project as Complete. */
   complete: boolean;
   completedOn: string | null;
@@ -96,6 +100,10 @@ export interface BpReview {
 export interface RepSetting {
   name: string;
   commissionRate: number;
+  /** This rep's name in Builder Prime ("Mike Schmitz"), so synced jobs get this rep for certain. */
+  builderPrimeName?: string;
+  /** Found on a job or in Builder Prime and added by the app; true until a rate is set. */
+  needsRate?: boolean;
 }
 
 export interface Settings {

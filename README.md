@@ -28,13 +28,25 @@ Settings: address `https://windowdepotnew.builderprime.com`, key in `.env.local`
 
 | From Builder Prime (sync) | You enter |
 |---|---|
-| Customer, sales rep, product (windows, patio door, entry door) | ProVia Order # (the job number) |
+| Customer, sales rep (see below), product (windows, patio door, entry door) | ProVia Order # (the job number) |
 | Contract value (after discounts, = Sold Contracts "Sale Amount") | Date sold |
 | Total paid so far (goes in as the deposit on a new job; its date is the sale date once you enter it) | Labor est. and labor paid |
 | Builder Prime cost (fills materials est. when empty) | Finance %, materials paid, payment split and dates |
 | Builder Prime job #, status, completed date | Commission paid |
 
 Builder Prime's API has no ProVia Order #, sale date, discount, payment dates or labor, so those are typed.
+
+**Sales rep**: the project's sales person in Builder Prime (`salesPersonFirstName` / `salesPersonLastName`
+on the project list; the API gives the name only, no user id).
+
+- **Settings > Sales reps** lists every rep: the ones set up there, every rep on a job, and every Builder
+  Prime sales person. One found by the app starts at 0% and is flagged until you set its commission rate.
+- Each rep has a **Name in Builder Prime** (e.g. SCHMITZ = Mike Schmitz). The sync fills it in when it can
+  tell; you can change it. A sales person not linked yet is matched by name: "SHAUN V", "SHAUN" or
+  "SCHMITZ" if already in use, otherwise first name and last initial (and added as a rep).
+- Each sync puts Builder Prime's sales person on every linked job: an empty rep is filled in and an open
+  job takes that rep (and so their commission rate). A completed job keeps its rep and shows
+  "Builder Prime rep: …" with a button to use it.
 
 **How sync works**
 

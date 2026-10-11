@@ -15,7 +15,10 @@ export async function PATCH(req: Request) {
   if (Array.isArray(patch.reps))
     next.reps = patch.reps
       .filter((r) => r && typeof r.name === "string" && r.name.trim())
-      .map((r) => ({ name: r.name.trim().toUpperCase(), commissionRate: Math.min(Math.max(Number(r.commissionRate) || 0, 0), 1) }));
+      .map((r) => {
+        const bpName = typeof r.builderPrimeName === "string" ? r.builderPrimeName.replace(/\s+/g, " ").trim() : "";
+        return { name: r.name.trim().toUpperCase(), commissionRate: Math.min(Math.max(Number(r.commissionRate) || 0, 0), 1), ...(bpName ? { builderPrimeName: bpName } : {}), ...(r.needsRate === true ? { needsRate: true } : {}) };
+      });
   try {
     return ok(await updateSettings(next));
   } catch (e) {

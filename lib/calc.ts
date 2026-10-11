@@ -1,3 +1,4 @@
+import { linkedRep } from "./bp-mapping";
 import type { Job, Settings } from "./types";
 
 /** Mirrors the formulas in the MASTER TRACKER spreadsheet. */
@@ -37,7 +38,15 @@ export interface MissingField {
 
 export type BpCheck =
   | { kind: "payments"; builderPrime: number; entered: number }
-  | { kind: "complete"; on: string | null };
+  | { kind: "complete"; on: string | null }
+  /** salesPerson is Builder Prime's name for them; rep is the app rep that is. */
+  | { kind: "rep"; salesPerson: string; rep: string };
+
+/** The app rep for a job's Builder Prime sales person: the rep linked to them in Settings, else the sync's match. */
+export function bpRep(job: Job, settings: Settings): string {
+  if (!job.bp?.salesPerson) return "";
+  return linkedRep(job.bp.salesPerson, settings.reps)?.name ?? job.bp.rep ?? "";
+}
 
 export function repRate(settings: Settings, rep: string): number {
   return settings.reps.find((r) => r.name === rep)?.commissionRate ?? 0;
@@ -85,6 +94,8 @@ export function compute(job: Job, settings: Settings): Computed {
   const checks: BpCheck[] = [];
   if (job.bp?.paid != null && Math.abs(job.bp.paid - totalPayments) >= 0.5) checks.push({ kind: "payments", builderPrime: job.bp.paid, entered: totalPayments });
   if (job.state === "open" && job.bp?.complete) checks.push({ kind: "complete", on: job.bp.completedOn });
+  const fromBp = bpRep(job, settings);
+  if (fromBp && fromBp !== job.rep) checks.push({ kind: "rep", salesPerson: job.bp!.salesPerson!, rep: fromBp });
 
   return {
     financeCharges,
