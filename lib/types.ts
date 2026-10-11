@@ -50,7 +50,45 @@ export interface Job {
   builderPrimeId: string | null;
   /** Builder Prime's own job # (e.g. 1950), for finding the project there. Not the job number. */
   builderPrimeJobNumber?: string | null;
+  /** What Builder Prime last said about this job (refreshed on every sync). */
+  bp?: BpSnapshot | null;
   updatedAt: string;
+}
+
+/** Builder Prime's figures for a linked job, kept as reported (they are never typed). */
+export interface BpSnapshot {
+  status: string;
+  projectName: string;
+  projectType: string;
+  /** Contract total after discounts (the Sold Contracts report's "Sale Amount"). */
+  contracted: number | null;
+  invoiced: number | null;
+  paid: number | null;
+  /** Builder Prime's cost (the report's "Contract Cost"). */
+  cost: number | null;
+  /** Builder Prime has the project as Complete. */
+  complete: boolean;
+  completedOn: string | null;
+  syncedAt: string;
+}
+
+/** A sold Builder Prime project as the sync sees it. */
+export interface BpCandidate {
+  projectId: string;
+  bpJobNumber: string;
+  name: string;
+  rep: string;
+  product: string;
+  stage: Stage;
+  snapshot: BpSnapshot;
+}
+
+export interface BpReview {
+  at: string;
+  /** Open sold projects with no job of that customer in the app. */
+  notInApp: BpCandidate[];
+  /** Same customer name as a job in the app, but the sync couldn't confirm it is that job. */
+  maybe: { project: BpCandidate; createdOn: string | null; jobs: { id: string; name: string; jobNumber: string; contractValue: number; soldDate: string | null; state: JobState }[] }[];
 }
 
 export interface RepSetting {
@@ -71,6 +109,12 @@ export interface StoreData {
   jobs: Job[];
   /** Builder Prime projects already seen sold. Any project that turns sold later is a new sale. */
   bpSoldSeen?: string[];
+  /** Builder Prime project details by project id, so a sync only re-reads what may have changed. */
+  bpCache?: Record<string, { modified: number | null; contracted: number | null; invoiced: number | null; paid: number | null }>;
+  /** Projects the last sync could not place safely, for you to add or link. */
+  bpReview?: BpReview | null;
+  /** Projects you chose to leave out of the app. */
+  bpIgnored?: string[];
 }
 
 export const STAGES: { key: Stage; label: string; color: string }[] = [

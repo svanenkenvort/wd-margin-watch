@@ -24,21 +24,40 @@ Open http://localhost:3000. Your 2025 and 2026 jobs (343 jobs from the spreadshe
 
 Settings: address `https://windowdepotnew.builderprime.com`, key in `.env.local` (never committed).
 
-**What Builder Prime's API gives, and what it doesn't** (checked against the live API on 2026-10-10):
-projects come back as flat records: customer, sales rep, project name and type, status, Builder Prime's
-own job # (e.g. 1950) and its cost. There is **no scope, price line, ProVia Order #, contract value,
-sold date or payment** on them, and no other Open API endpoint or the Zapier app has them. So:
+**What comes from Builder Prime** (checked against the live API on 2026-10-10):
 
-- **Sync only adds new sales.** The first sync remembers which projects are already sold (they are
-  already in the app from the spreadsheet) and adds nothing. After that, each project that turns sold
-  in Builder Prime comes in as a new open job. Jobs already in the app are never changed.
-- **New jobs need the ProVia Order # (the job number) and contract value typed in.** They show in
-  "needs numbers" until you do. Builder Prime's job # is kept for reference (job drawer and notes).
-- **Date sold** on a new job is Builder Prime's last change to the project, which is on or after the
-  sale. Sync daily and it is the sale date or within a day of it.
-- **Settings > Test connection** shows what a sync would add, without saving anything. On the first
-  sync it also lists open sold projects with no job of that customer's name in the app: add any that
-  are really missing by hand, because the sync takes them as already in the app.
+| From Builder Prime (sync) | You enter |
+|---|---|
+| Customer, sales rep, product (windows, patio door, entry door) | ProVia Order # (the job number) |
+| Contract value (after discounts, = Sold Contracts "Sale Amount") | Date sold |
+| Total paid so far (goes in as the deposit on a new job) | Labor est. and labor paid |
+| Builder Prime cost (fills materials est. when empty) | Finance %, materials paid, payment split and dates |
+| Builder Prime job #, status, completed date | Commission paid |
+
+Builder Prime's API has no ProVia Order #, sale date, discount, payment dates or labor, so those are typed.
+
+**How sync works**
+
+- **First sync** reads every sold project (about 2–3 minutes: Builder Prime allows roughly 80 requests,
+  then makes the app wait ~40 seconds). It links your existing jobs to their Builder Prime project by
+  customer name and contract value, and adds nothing.
+- **Returning customers**: every Builder Prime project is its own job. A project is only linked to a
+  job of the same customer and contract value that was not sold before the project existed in
+  Builder Prime, and a new sale never lands on a completed job, so a second purchase becomes a second
+  job. When a same-name job might be the project but the sync can't confirm it, it asks (below)
+  rather than guessing, so nothing is added twice.
+- **After that**, each project that turns sold in Builder Prime comes in as an **open job**. Each sync
+  re-reads only the projects linked to open jobs or still owing money (under a minute).
+- **Linked open jobs** take Builder Prime's contract value (change orders), and an empty materials
+  estimate or product is filled in. Completed jobs keep their numbers. Payments you typed are never
+  changed: if they differ from Builder Prime's total, the job says so and offers to add the difference.
+- **Settings > Builder Prime: needs a look** lists sold projects the sync could not place safely: same
+  customer as a job but not confirmed (link, add as a new job, or leave out), or no job of that name
+  (add, add all, or leave out). Open jobs shows a banner while anything is waiting there.
+
+**Entering the rest**: on Open jobs, a missing ProVia Order # or date sold can be typed right in the
+row, and each row says what else is missing. Opening a job shows a "Still to enter" checklist
+(click an item to jump to it) and Builder Prime's figures for comparison.
 
 ## Where things are
 

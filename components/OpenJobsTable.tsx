@@ -5,13 +5,14 @@ import { dateLabel, money, pct, repLabel, todayISO } from "@/lib/format";
 import { STAGES, stageMeta, type Job, type Settings } from "@/lib/types";
 import type { Row } from "@/lib/stats";
 import { JobDrawer } from "./JobDrawer";
-import { NumField, Overlay, useJobApi, useToast } from "./inputs";
+import { BpFlags, MissingLine } from "./JobTodo";
+import { DateCell, NumField, Overlay, TextField, useJobApi, useToast } from "./inputs";
 
 type SortKey = "oldest" | "newest" | "largest" | "margin";
 
 const tone = (p: number | null, target: number) => (p === null ? "" : p >= target ? "good" : p >= target - 0.05 ? "warn" : "low");
 
-export function OpenJobsTable({ rows, settings, initialJobId }: { rows: Row[]; settings: Settings; initialJobId?: string }) {
+export function OpenJobsTable({ rows, settings, initialJobId, review = 0 }: { rows: Row[]; settings: Settings; initialJobId?: string; review?: number }) {
   const { toast, show } = useToast();
   const api = useJobApi(show);
   const [q, setQ] = useState("");
@@ -66,12 +67,17 @@ export function OpenJobsTable({ rows, settings, initialJobId }: { rows: Row[]; s
           <option value="margin">Lowest estimated margin first</option>
         </select>
         <button className={`chip${needsOnly ? " on" : ""}`} onClick={() => setNeedsOnly((v) => !v)} aria-pressed={needsOnly}>
-          Needs numbers <b>{needs}</b>
+          Still to enter <b>{needs}</b>
         </button>
         <span className="grow" />
         <button className="btn btn-primary" onClick={() => setEditing("new")}>New job</button>
       </div>
 
+      {review > 0 && (
+        <p className="banner">
+          {review} sold project{review === 1 ? " in Builder Prime isn't" : "s in Builder Prime aren't"} matched to a job yet. <a href="/settings#builder-prime-review">Review them</a> to add or link them.
+        </p>
+      )}
       <div className="table-wrap">
         <table className="grid">
           <thead>
@@ -88,7 +94,7 @@ export function OpenJobsTable({ rows, settings, initialJobId }: { rows: Row[]; s
               <th>Sold</th>
               <th>Stage</th>
               <th className="num">Contract</th>
-              <th className="num">Deposit</th>
+              <th className="num">Paid</th>
               <th className="num">Balance</th>
               <th className="num entry-col">Materials est.</th>
               <th className="num entry-col">Labor est.</th>
@@ -114,9 +120,18 @@ export function OpenJobsTable({ rows, settings, initialJobId }: { rows: Row[]; s
                 <tr key={job.id}>
                   <td className="sticky-col">
                     <button className="linkish" onClick={() => setEditing(job.id)}>{job.name}</button>
-                    <small>{job.jobNumber} {job.product && <>· {job.product}</>}</small>
+                    {job.jobNumber ? (
+                      <small>{job.jobNumber} {job.product && <>· {job.product}</>}</small>
+                    ) : (
+                      <TextField label={`ProVia Order # for ${job.name}`} placeholder="ProVia Order #" value="" needed onCommit={(v) => v && api.patch(job.id, { jobNumber: v }, "ProVia Order # saved")} />
+                    )}
+                    {job.builderPrimeJobNumber && <small>Builder Prime #{job.builderPrimeJobNumber}</small>}
+                    <MissingLine missing={c.missing.filter((m) => m.field !== "jobNumber" && m.field !== "soldDate")} onOpen={() => setEditing(job.id)} />
+                    <BpFlags checks={c.checks} onOpen={() => setEditing(job.id)} />
                   </td>
-                  <td className="nowrap">{dateLabel(job.soldDate, false)}</td>
+                  <td className="nowrap">
+                    {job.soldDate ? dateLabel(job.soldDate, false) : <DateCell label={`Date sold for ${job.name}`} value={null} needed onCommit={(v) => v && api.patch(job.id, { soldDate: v }, "Date sold saved")} />}
+                  </td>
                   <td>
                     <select
                       className="stage-select"
@@ -130,7 +145,7 @@ export function OpenJobsTable({ rows, settings, initialJobId }: { rows: Row[]; s
                     </select>
                   </td>
                   <td className="num">{money(job.contractValue)}</td>
-                  <td className="num">{job.financed && !job.depositAmount ? <span className="tag">Financed</span> : money(job.depositAmount)}</td>
+                  <td className="num">{job.financed && !c.totalPayments ? <span className="tag">Financed</span> : money(c.totalPayments)}</td>
                   <td className={`num${c.balance > 1 ? "" : " muted"}`}>{money(c.balance)}</td>
                   <td className="num entry-col"><NumField label={`Materials estimate for ${job.name}`} value={job.materialsEst} needed={job.materialsEst === null} onCommit={(v) => api.patch(job.id, { materialsEst: v })} /></td>
                   <td className="num entry-col"><NumField label={`Labor estimate for ${job.name}`} value={job.laborEst} needed={job.laborEst === null} onCommit={(v) => api.patch(job.id, { laborEst: v })} /></td>

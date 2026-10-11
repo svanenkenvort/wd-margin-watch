@@ -2,70 +2,99 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { dateLabel, pct } from "@/lib/format";
-import type { RepSetting, Settings } from "@/lib/types";
+import { dateLabel, money, pct } from "@/lib/format";
+import type { BpCandidate, BpReview, RepSetting, Settings } from "@/lib/types";
 import { NumField, useToast } from "./inputs";
 
-interface NewProject {
-  builderPrimeId: string;
-  bpJobNumber: string;
-  name: string;
-  rep: string;
-  soldDate: string | null;
-  status: string;
-  projectName: string;
+interface TestResult {
+  base: string;
+  projects: number;
+  sold: number;
+  linked: number;
+  firstSync: boolean;
+  toRead: number;
+  minutes: number;
 }
-interface Plan {
+interface SyncResult {
   firstSync: boolean;
   fetched: number;
   sold: number;
-  toAdd: NewProject[];
-  notFoundInApp: NewProject[];
-}
-type TestResult = Plan & { base: string };
-type SyncResult = Plan & { created: number };
-
-function ProjectList({ items }: { items: NewProject[] }) {
-  return (
-    <table className="mini">
-      <thead><tr><th>Customer</th><th>Builder Prime job #</th><th>Project</th><th>Rep</th><th>Status</th></tr></thead>
-      <tbody>
-        {items.map((p) => (
-          <tr key={p.builderPrimeId}><td>{p.name}</td><td>{p.bpJobNumber}</td><td>{p.projectName}</td><td>{p.rep}</td><td>{p.status}</td></tr>
-        ))}
-      </tbody>
-    </table>
-  );
+  detailsRead: number;
+  created: number;
+  linked: number;
+  updated: number;
+  changes: string[];
+  review: { notInApp: number; maybe: number };
 }
 
-function PlanDetail({ plan, done }: { plan: Plan; done: boolean }) {
-  if (plan.firstSync)
-    return (
-      <>
-        <p className="hint">
-          {done ? "First sync done." : "This is the first sync."} The {plan.sold} projects already sold in Builder Prime are taken as already in the app, so nothing is added{done ? "" : " this time"}.
-          From then on, each project that turns sold in Builder Prime comes in as a new open job.
-        </p>
-        {plan.notFoundInApp.length > 0 && (
-          <>
-            <p className="hint low">
-              These open sold projects have no job with that customer&apos;s name in the app. If any is really missing, add it by hand: the sync takes it as already in the app.
-            </p>
-            <ProjectList items={plan.notFoundInApp} />
-          </>
-        )}
-      </>
-    );
-  if (!plan.toAdd.length) return <p className="hint">No new sales in Builder Prime.</p>;
-  return (
+/** Sold projects the sync could not place by itself: add them, link them to a job, or leave them out. */
+function ReviewList({ review, onDone }: { review: BpReview; onDone: (msg: string) => void }) {
+  const [busy, setBusy] = useState("");
+  const [pick, setPick] = useState<Record<string, string>>({});
+  const act = async (key: string, payload: Record<string, string>, msg: string) => {
+    setBusy(key);
+    const res = await fetch("/api/builderprime/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    setBusy("");
+    const data = await res.json().catch(() => ({}));
+    onDone(res.ok ? msg : data.error ?? "That didn't work.");
+  };
+  const who = (c: BpCandidate) => (
     <>
-      <p className="hint">{plan.toAdd.length} new sale{plan.toAdd.length === 1 ? "" : "s"} {done ? "added" : "will be added"} as open jobs. Type the ProVia Order #, contract value and estimates on each. Builder Prime does not provide them.</p>
-      <ProjectList items={plan.toAdd} />
+      <strong>{c.name}</strong> <span className="muted">Builder Prime #{c.bpJobNumber} · {c.snapshot.projectName || c.snapshot.projectType} · {c.rep} · {c.snapshot.status}</span>
+      <br />
+      <small>Contract {money(c.snapshot.contracted, true)} · paid {money(c.snapshot.paid, true)} · cost {money(c.snapshot.cost, true)}</small>
     </>
   );
+  if (!review.notInApp.length && !review.maybe.length) return <p className="hint">Every open sold project in Builder Prime is matched to a job.</p>;
+  return (
+    <div className="review">
+      {review.maybe.length > 0 && (
+        <>
+          <h3>Same customer as a job in the app ({review.maybe.length})</h3>
+          <p className="hint">The sync couldn&apos;t confirm it is that job (the contract value or sold date doesn&apos;t fit). Link it if it is the same job: Builder Prime&apos;s contract value then replaces the app&apos;s on an open job. If the customer came back and bought again, add it as a new job.</p>
+          <ul>
+            {review.maybe.map(({ project: c, jobs, createdOn }) => {
+              const chosen = pick[c.projectId] ?? jobs[0]?.id;
+              return (
+                <li key={c.projectId}>
+                  <div>{who(c)}{createdOn && <small> · created in Builder Prime {dateLabel(createdOn)}</small>}</div>
+                  <div className="review-actions">
+                    <select aria-label={`Job to link ${c.name} to`} value={chosen} onChange={(e) => setPick({ ...pick, [c.projectId]: e.target.value })}>
+                      {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {j.jobNumber || "no ProVia #"} · {money(j.contractValue, true)} · sold {j.soldDate ? dateLabel(j.soldDate) : "?"} · {j.state}</option>)}
+                    </select>
+                    <button className="btn btn-small btn-primary" disabled={!!busy} onClick={() => act(c.projectId, { action: "link", projectId: c.projectId, jobId: chosen }, `${c.name} linked`)}>Link</button>
+                    <button className="btn btn-small" disabled={!!busy} onClick={() => act(c.projectId, { action: "add", projectId: c.projectId }, `${c.name} added as an open job`)}>Add as new job</button>
+                    <button className="btn btn-small btn-quiet" disabled={!!busy} onClick={() => act(c.projectId, { action: "ignore", projectId: c.projectId }, `${c.name} left out`)}>Leave out</button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {review.notInApp.length > 0 && (
+        <>
+          <h3>Not in the app ({review.notInApp.length})</h3>
+          <p className="hint">Open sold projects with no job of that customer&apos;s name. Add the ones that are real open jobs; leave out any that are finished or not yours to track.</p>
+          <button className="btn btn-small btn-primary" disabled={!!busy} onClick={() => act("all", { action: "addAll" }, `${review.notInApp.length} added as open jobs`)}>Add all {review.notInApp.length} as open jobs</button>
+          <ul>
+            {review.notInApp.map((c) => (
+              <li key={c.projectId}>
+                <div>{who(c)}</div>
+                <div className="review-actions">
+                  <button className="btn btn-small" disabled={!!busy} onClick={() => act(c.projectId, { action: "add", projectId: c.projectId }, `${c.name} added as an open job`)}>Add as open job</button>
+                  <button className="btn btn-small btn-quiet" disabled={!!busy} onClick={() => act(c.projectId, { action: "ignore", projectId: c.projectId }, `${c.name} left out`)}>Leave out</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
 }
 
-export function SettingsPanel({ settings, bp }: { settings: Settings; bp: { base: string; hasKey: boolean; subdomain: string } }) {
+export function SettingsPanel({ settings, bp, review }: { settings: Settings; bp: { base: string; hasKey: boolean; subdomain: string }; review: BpReview | null }) {
   const router = useRouter();
   const { toast, show } = useToast();
   const [reps, setReps] = useState<RepSetting[]>(settings.reps);
@@ -145,18 +174,29 @@ export function SettingsPanel({ settings, bp }: { settings: Settings; bp: { base
           <button className="btn btn-primary" onClick={() => run("sync")} disabled={busy !== "" || !bp.hasKey}>{busy === "sync" ? "Syncing…" : "Sync jobs now"}</button>
         </div>
         {error && <p className="alert" role="alert">{error}</p>}
+        {busy === "sync" && <p className="hint">Reading Builder Prime. The first sync reads every sold project and takes a few minutes because Builder Prime limits how fast it answers.</p>}
         {test && (
           <div className="result">
-            <p><strong>Connected.</strong> Builder Prime has {test.fetched} projects, {test.sold} of them sold. Nothing was saved.</p>
-            <PlanDetail plan={test} done={false} />
+            <p><strong>Connected.</strong> Builder Prime has {test.projects} projects, {test.sold} of them sold; {test.linked} are linked to jobs here. Nothing was saved.</p>
+            <p className="hint">
+              {test.firstSync ? "This will be the first sync: it links your existing jobs and lists anything it can't match. " : ""}
+              The next sync reads {test.toRead} project{test.toRead === 1 ? "" : "s"} in detail, about {test.minutes} minute{test.minutes === 1 ? "" : "s"}.
+            </p>
           </div>
         )}
         {sync && (
           <div className="result">
-            <p><strong>Sync finished.</strong> {sync.fetched} projects checked, {sync.created} added. Jobs already in the app are never changed.</p>
-            <PlanDetail plan={sync} done />
+            <p><strong>Sync finished.</strong> {sync.sold} sold projects checked: {sync.created} new open job{sync.created === 1 ? "" : "s"}, {sync.linked} existing job{sync.linked === 1 ? "" : "s"} linked, {sync.updated} updated.</p>
+            {sync.firstSync && <p className="hint">First sync: projects already sold were matched to your jobs, not added. From now on each new sale comes in as an open job.</p>}
+            {sync.changes.map((ch) => <p key={ch} className="hint">{ch}</p>)}
+            {sync.review.notInApp + sync.review.maybe > 0 && <p className="hint warn">{sync.review.notInApp + sync.review.maybe} project{sync.review.notInApp + sync.review.maybe === 1 ? " needs" : "s need"} a look below.</p>}
           </div>
         )}
+      </section>
+
+      <section className="pane block" id="builder-prime-review">
+        <h2 className="pane-title">Builder Prime: needs a look</h2>
+        {review ? <ReviewList review={review} onDone={(m) => { show(m); router.refresh(); }} /> : <p className="hint">Run a sync to match Builder Prime projects to your jobs.</p>}
       </section>
       {toast}
     </div>

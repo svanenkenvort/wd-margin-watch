@@ -14,7 +14,7 @@ export async function GET() {
   }
 }
 
-/** POST = pull projects into the app. */
+/** POST = pull projects into the app. The first sync reads every sold project and can take a few minutes. */
 export async function POST() {
   const { settings } = await readStore();
   try {

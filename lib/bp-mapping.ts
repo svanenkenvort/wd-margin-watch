@@ -1,9 +1,11 @@
+import type { Stage } from "./types";
+
 /**
- * Builder Prime project records, as GET /api/projects/v1 returns them (checked against the live
- * API on 2026-10-10). The records are flat: there is no scope, price line, contract amount, sold
- * date or payment on them, and no other Open API endpoint has them either. So the ProVia Order #
- * (the job number), contract value and payments are typed in the app; Builder Prime supplies who,
- * which rep, its own job # and when the project turned sold.
+ * Builder Prime project records (checked against the live API on 2026-10-10).
+ * The list (GET /api/projects/v1) has who, rep, status, Builder Prime's job # and cost. Only the
+ * single project (GET /api/projects/v1/{id}) adds the money: contracted, invoiced and paid totals.
+ * Nothing in the Open API has the ProVia Order #, the sale date, discounts, the payment split or
+ * labor, so those are typed in the app.
  */
 export interface BpProject {
   id: number | string;
@@ -21,13 +23,40 @@ export interface BpProject {
   projectStatusCategoryDescription: string | null;
   projectStatusIsCancelled: boolean | null;
   materialCost: number | null;
+  createdDate: number | null;
   lastModifiedDate: number | null;
+  completionDateTime: number | null;
+}
+
+/** Only on the single-project response. */
+export interface BpProjectDetail extends BpProject {
+  /** Contract total after discounts: the Sold Contracts report's "Sale Amount". */
+  totalContractedAmount?: number | null;
+  totalInvoicedAmount?: number | null;
+  totalPaidAmount?: number | null;
 }
 
 /** Status categories that mean the project is sold (Sold, Deposit Received, Scheduled, Complete). */
 const SOLD_CATEGORIES = new Set(["PRE_PRODUCTION", "PRODUCTION", "POST_PRODUCTION"]);
 
 export const isSold = (p: BpProject) => SOLD_CATEGORIES.has(p.projectStatusCategoryDescription ?? "") && !p.projectStatusIsCancelled;
+export const isComplete = (p: BpProject) => p.projectStatusCategoryDescription === "POST_PRODUCTION";
+
+/** Builder Prime project types that map to one product code without guessing. Others are left for you. */
+const PRODUCTS: Record<string, string> = {
+  "Replacement Windows": "W",
+  "Sliding Glass Door": "PD",
+  "Entry Doors": "ED",
+};
+export const productCode = (p: BpProject) => PRODUCTS[(p.projectTypeDescription ?? "").trim()] ?? "";
+
+/** Where a newly sold job starts on the Open jobs board. */
+export function startStage(p: BpProject, paid: number): Stage {
+  const status = (p.projectStatusDescription ?? "").toLowerCase();
+  if (isComplete(p)) return "completedAwaitingPay";
+  if (status.includes("scheduled")) return "scheduled";
+  return paid > 0 || status.includes("deposit") ? "needsMeasure" : "awaitingDeposit";
+}
 
 /** Epoch milliseconds (what Builder Prime sends) or an ISO string, as yyyy-mm-dd in local time. */
 export function asDate(v: unknown): string | null {

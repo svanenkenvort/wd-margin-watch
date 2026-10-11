@@ -20,7 +20,8 @@ export function SyncButton() {
             const data = await res.json();
             if (!res.ok) show(data.error ?? "Builder Prime didn't answer.", "error");
             else {
-              show(data.firstSync ? "Builder Prime connected. New sales come in from the next sync." : `Builder Prime synced: ${data.created} new sale${data.created === 1 ? "" : "s"} added`);
+              const review = data.review.notInApp + data.review.maybe;
+              show(`Builder Prime synced: ${data.created} new open job${data.created === 1 ? "" : "s"}, ${data.linked + data.updated} updated${review ? `, ${review} to review in Settings` : ""}`);
               router.refresh();
             }
           } catch {
@@ -29,7 +30,7 @@ export function SyncButton() {
           setBusy(false);
         }}
       >
-        {busy ? "Syncing…" : "Sync Builder Prime"}
+        {busy ? "Syncing… (can take a few minutes)" : "Sync Builder Prime"}
       </button>
       {toast}
     </>
